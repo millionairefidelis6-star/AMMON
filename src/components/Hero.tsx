@@ -13,21 +13,21 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
     {
       id: 1,
       badge: 'Together for a Digital Nigeria',
-      image: '/src/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
+      image: '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
       alt: 'Nigerian female POS agent wearing AMMON green uniform with POS terminal',
       caption: 'Over 140,000 operators certified nationwide'
     },
     {
       id: 2,
       badge: 'CBN Regulatory Alignment',
-      image: '/src/assets/images/cbn_headquarters_abuja_1794380622253.jpg',
+      image: '/assets/images/cbn_headquarters_abuja_1794380622253.jpg',
       alt: 'Central Bank of Nigeria Headquarters',
       caption: 'Protecting operators against illegal taxes & arbitrary fees'
     },
     {
       id: 3,
       badge: 'Financial Inclusion for All',
-      image: '/src/assets/images/lagos_lekki_bridge_skyline_1794380622729.jpg',
+      image: '/assets/images/lagos_lekki_bridge_skyline_1794380622729.jpg',
       alt: 'Lagos commercial landscape and Lekki Link Bridge',
       caption: 'Connecting 774 Local Government Areas to modern banking'
     }
@@ -118,6 +118,9 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
                 alt={slides[currentSlide].alt}
                 className="w-full h-full object-cover object-center transition-all duration-500 ease-out"
                 referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+                }}
               />
 
               {/* Gradient scrim for text legibility */}

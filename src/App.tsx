@@ -47,7 +47,14 @@ export default function App() {
   const [members, setMembers] = useState<Member[]>(() => {
     try {
       const saved = localStorage.getItem('ammon_members');
-      return saved ? JSON.parse(saved) : INITIAL_MEMBERS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.map((m: Member) => ({
+          ...m,
+          photoUrl: m.photoUrl ? m.photoUrl.replace('/src/assets/images/', '/assets/images/') : m.photoUrl
+        }));
+      }
+      return INITIAL_MEMBERS;
     } catch {
       return INITIAL_MEMBERS;
     }
@@ -64,7 +71,14 @@ export default function App() {
   const [loggedInMember, setLoggedInMember] = useState<Member | null>(() => {
     try {
       const saved = localStorage.getItem('ammon_logged_in_member');
-      return saved ? JSON.parse(saved) : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...parsed,
+          photoUrl: parsed.photoUrl ? parsed.photoUrl.replace('/src/assets/images/', '/assets/images/') : parsed.photoUrl
+        };
+      }
+      return null;
     } catch {
       return null;
     }
@@ -660,7 +674,7 @@ export default function App() {
             <div className="p-6 overflow-y-auto space-y-4 text-xs sm:text-sm text-[#252525] leading-relaxed">
               <div className="rounded-xl overflow-hidden aspect-16/9 mb-2">
                 <img
-                  src="/src/assets/images/lagos_lekki_bridge_skyline_1794380622729.jpg"
+                  src="/assets/images/lagos_lekki_bridge_skyline_1794380622729.jpg"
                   alt="Lagos Headquarters"
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"

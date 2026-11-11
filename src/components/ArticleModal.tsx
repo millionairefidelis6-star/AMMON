@@ -29,6 +29,9 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
             alt={article.title}
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+            }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
           <button

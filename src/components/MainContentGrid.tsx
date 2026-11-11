@@ -66,10 +66,13 @@ export const MainContentGrid: React.FC<MainContentGridProps> = ({
           {/* Lagos Lekki Bridge Scenic Image */}
           <div className="rounded-xl overflow-hidden border border-[#E5E7EB] aspect-16/10 relative group">
             <img
-              src="/src/assets/images/lagos_lekki_bridge_skyline_1794380622729.jpg"
+              src="/assets/images/lagos_lekki_bridge_skyline_1794380622729.jpg"
               alt="Lagos Lekki-Ikoyi Link Bridge Commercial Skyline"
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
               referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+              }}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent flex items-end p-2.5">
               <span className="text-[11px] text-white font-medium drop-shadow-xs">
@@ -110,6 +113,9 @@ export const MainContentGrid: React.FC<MainContentGridProps> = ({
                   alt={featuredArticle.title}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = '/assets/images/cbn_headquarters_abuja_1794380622253.jpg';
+                  }}
                 />
                 <span className="absolute top-2.5 left-2.5 bg-[#176B37] text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow-sm">
                   Breaking News
@@ -145,6 +151,9 @@ export const MainContentGrid: React.FC<MainContentGridProps> = ({
                   alt={article.title}
                   className="w-16 h-14 rounded-lg object-cover shrink-0 border border-gray-200"
                   referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = '/assets/images/ammon_stakeholders_forum_1794380623181.jpg';
+                  }}
                 />
                 <div className="flex-1 min-w-0">
                   <h4 className="text-xs font-bold text-[#252525] group-hover:text-[#176B37] transition-colors line-clamp-2 leading-tight">

@@ -138,7 +138,7 @@ export const DigitalMembershipCardModal: React.FC<DigitalMembershipCardModalProp
                   <div className="col-span-4 flex flex-col items-center">
                     <div className="w-20 h-24 rounded-lg overflow-hidden border-2 border-[#176B37] shadow-sm relative bg-slate-100">
                       <img
-                        src={member.photoUrl || '/src/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
+                        src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
                         alt={member.fullName}
                         className="w-full h-full object-cover"
                         referrerPolicy="no-referrer"

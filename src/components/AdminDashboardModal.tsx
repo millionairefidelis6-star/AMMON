@@ -216,7 +216,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       content: newContent || newExcerpt,
       date: 'Nov 11, 2025',
       author: adminUser.fullName,
-      image: '/src/assets/images/cbn_headquarters_abuja_1794380622253.jpg',
+      image: '/assets/images/cbn_headquarters_abuja_1794380622253.jpg',
       featured: false,
       readTime: '3 min read',
       attachmentName: attachmentFile?.name,
@@ -884,6 +884,9 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                               alt={item.title}
                               className="w-20 h-16 rounded-lg object-cover shrink-0"
                               referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src = '/assets/images/cbn_headquarters_abuja_1794380622253.jpg';
+                              }}
                             />
                             <div>
                               <div className="flex items-center gap-2">

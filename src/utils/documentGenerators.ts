@@ -271,7 +271,7 @@ export function printDigitalCardDocument(member: Member) {
       </div>
       <div class="card-body">
         <div class="photo-box">
-          <img src="${member.photoUrl || '/src/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}" alt="${member.fullName}" />
+          <img src="${member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}" alt="${member.fullName}" />
         </div>
         <div class="info-box">
           <div class="label">Operator Name</div>

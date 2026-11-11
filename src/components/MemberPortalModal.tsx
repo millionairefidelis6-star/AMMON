@@ -202,7 +202,7 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
               <div className="relative shrink-0">
                 <div className="w-11 h-11 rounded-xl overflow-hidden border-2 border-white/40 shadow-xs bg-emerald-950">
                   <img
-                    src={member.photoUrl || '/src/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
+                    src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
                     alt={member.fullName}
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
@@ -560,7 +560,7 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                             <div className="col-span-4 flex flex-col items-center">
                               <div className="w-20 h-24 rounded-lg overflow-hidden border-2 border-[#176B37] shadow-sm relative bg-slate-100">
                                 <img
-                                  src={member.photoUrl || '/src/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
+                                  src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
                                   alt={member.fullName}
                                   className="w-full h-full object-cover"
                                   referrerPolicy="no-referrer"

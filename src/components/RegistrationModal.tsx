@@ -73,7 +73,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
         status: 'Active',
         joinedDate: '11 Nov 2025',
         expiryDate: '31 Dec 2026',
-        photoUrl: '/src/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
+        photoUrl: '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
         duesPaid: true,
         duesAmount,
       };

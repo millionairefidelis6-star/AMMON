@@ -250,8 +250,8 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Member Login or Authenticated Member Menu */}
-            {loggedInMember ? (
+            {/* Authenticated Member Menu if active */}
+            {loggedInMember && (
               <div className="relative">
                 <button
                   onClick={() => setMemberMenuOpen(!memberMenuOpen)}
@@ -293,14 +293,6 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 )}
               </div>
-            ) : (
-              <button
-                onClick={onOpenLogin}
-                className="flex items-center gap-1.5 text-xs font-medium hover:text-emerald-200 transition-colors cursor-pointer"
-              >
-                <User className="w-3.5 h-3.5" />
-                <span>Member Login</span>
-              </button>
             )}
 
             {/* Google Authenticated Account Indicator */}
@@ -366,17 +358,6 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               </div>
             )}
-
-            <span className="text-white/30">|</span>
-
-            {/* Join AMMON CTA */}
-            <button
-              onClick={onOpenRegister}
-              className="bg-[#176B37] hover:bg-[#14532D] text-white text-xs font-semibold px-3.5 py-1 rounded-full transition-all duration-150 flex items-center gap-1 shadow-xs border border-white/20 cursor-pointer"
-            >
-              <span>Join AMMON</span>
-              <ArrowRight className="w-3 h-3" />
-            </button>
           </div>
         </div>
       </div>
@@ -520,12 +501,6 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Mobile hamburger menu toggle */}
           <div className="flex xl:hidden items-center gap-2">
-            <button
-              onClick={onOpenRegister}
-              className="sm:hidden bg-[#176B37] text-white text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer"
-            >
-              Join
-            </button>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED] rounded-lg transition-colors cursor-pointer"

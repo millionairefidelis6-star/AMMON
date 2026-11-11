@@ -1,0 +1,16 @@
+{
+  "name": "AMMON Nigeria - Association of Mobile Money Operators",
+  "short_name": "AMMON",
+  "description": "Official institutional portal and digital membership identity for the Association of Mobile Money Operators of Nigeria.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#176B37",
+  "icons": [
+    {
+      "src": "/assets/aistudio/file_0000000035fc82108dac8fb586cc0e31_2df36242.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png"
+    }
+  ]
+}

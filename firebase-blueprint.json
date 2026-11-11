@@ -1,0 +1,108 @@
+{
+  "entities": {
+    "member": {
+      "title": "AMMON Registered Member",
+      "description": "Registered POS Agent, Super Agent, or Fintech operator in AMMON national registry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "membershipId": { "type": "string", "maxLength": 64 },
+        "fullName": { "type": "string", "maxLength": 128 },
+        "businessName": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "state": { "type": "string", "maxLength": 64 },
+        "lga": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "maxLength": 64 },
+        "tier": { "type": "string", "maxLength": 32 },
+        "terminalSerialNumber": { "type": "string", "maxLength": 64 },
+        "terminalProvider": { "type": "string", "maxLength": 64 },
+        "bvnVerified": { "type": "boolean" },
+        "cbnCompliant": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["Active", "Pending Verification", "Expired", "Suspended"] },
+        "joinedDate": { "type": "string", "maxLength": 32 },
+        "expiryDate": { "type": "string", "maxLength": 32 },
+        "photoUrl": { "type": "string", "maxLength": 1024 },
+        "duesPaid": { "type": "boolean" },
+        "duesAmount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["membershipId", "fullName", "businessName", "phone", "state", "status"]
+    },
+    "news_article": {
+      "title": "Regulatory Circular & Gazette Notice",
+      "description": "Official circular, directive, or press release published by AMMON Directorate",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "category": { "type": "string", "enum": ["Breaking News", "Regulatory", "Press Release", "Notice", "Academy"] },
+        "excerpt": { "type": "string", "maxLength": 512 },
+        "content": { "type": "string", "maxLength": 65536 },
+        "date": { "type": "string", "maxLength": 32 },
+        "author": { "type": "string", "maxLength": 128 },
+        "image": { "type": "string", "maxLength": 1024 },
+        "featured": { "type": "boolean" },
+        "readTime": { "type": "string", "maxLength": 32 },
+        "attachmentName": { "type": "string", "maxLength": 256 },
+        "attachmentSize": { "type": "string", "maxLength": 64 },
+        "attachmentData": { "type": "string", "maxLength": 1048576 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "excerpt", "content", "date", "author"]
+    },
+    "dispute_ticket": {
+      "title": "Legal Aid / Dispute Ticket",
+      "description": "Operator incident complaint regarding LGA levy harassment, seizure, or frozen wallet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "ticketNumber": { "type": "string", "maxLength": 64 },
+        "agentId": { "type": "string", "maxLength": 64 },
+        "agentName": { "type": "string", "maxLength": 128 },
+        "businessName": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "issueType": { "type": "string", "maxLength": 64 },
+        "state": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["Open", "Under Investigation", "Resolved"] },
+        "dateReported": { "type": "string", "maxLength": 32 },
+        "description": { "type": "string", "maxLength": 4096 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ticketNumber", "agentName", "phone", "issueType", "state", "status", "description"]
+    },
+    "user_profile": {
+      "title": "Authenticated User Profile",
+      "description": "Profile for Google sign-in users linking to member or administrator roles",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "role": { "type": "string", "enum": ["Member", "Super Admin", "Executive", "Operator"] },
+        "membershipId": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/members/{memberId}": {
+      "schema": { "$ref": "member" },
+      "description": "AMMON National Certified Operator Registry"
+    },
+    "/news/{newsId}": {
+      "schema": { "$ref": "news_article" },
+      "description": "National Directorate Circulars, Gazettes, and Directives"
+    },
+    "/disputes/{disputeId}": {
+      "schema": { "$ref": "dispute_ticket" },
+      "description": "Operator Complaints and Legal Defense Desk Tickets"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "user_profile" },
+      "description": "User Account Profiles and Role Verification"
+    }
+  }
+}

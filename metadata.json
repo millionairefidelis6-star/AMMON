@@ -1,0 +1,6 @@
+{
+  "name": "AMMON - Association of Mobile Money Operators of Nigeria",
+  "description": "Official institutional portal, digital membership verification, and administrative platform for the Association of Mobile Money Operators of Nigeria (AMMON).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

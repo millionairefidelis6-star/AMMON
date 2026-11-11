@@ -1,0 +1,559 @@
+import React, { useState } from 'react';
+import { 
+  X, 
+  Lock, 
+  User, 
+  ShieldCheck, 
+  ArrowRight, 
+  CheckCircle2, 
+  AlertCircle, 
+  Building,
+  KeyRound,
+  Sparkles,
+  ShieldAlert,
+  Crown,
+  Briefcase
+} from 'lucide-react';
+import { Member, AdminUser } from '../types';
+import { ADMIN_USERS, TEST_ADMIN_CREDENTIALS } from '../data/mockData';
+import { signInWithGoogle } from '../firebase';
+import { User as FirebaseUser } from 'firebase/auth';
+
+interface MemberLoginModalProps {
+  members: Member[];
+  isOpen: boolean;
+  onClose: () => void;
+  onLoginSuccess: (member: Member) => void;
+  onAdminLoginSuccess?: (admin: AdminUser) => void;
+  onGoogleLoginSuccess?: (user: FirebaseUser) => void;
+  onOpenRegister: () => void;
+  defaultTab?: 'operator' | 'admin';
+}
+
+export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
+  members,
+  isOpen,
+  onClose,
+  onLoginSuccess,
+  onAdminLoginSuccess,
+  onGoogleLoginSuccess,
+  onOpenRegister,
+  defaultTab = 'operator',
+}) => {
+  const [activeTab, setActiveTab] = useState<'operator' | 'admin'>(defaultTab);
+
+  // Operator credentials
+  const [identifier, setIdentifier] = useState('');
+  const [pin, setPin] = useState('');
+
+  // Admin credentials
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+
+  const [rememberMe, setRememberMe] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [showForgotNotice, setShowForgotNotice] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleGoogleSignIn = async () => {
+    setErrorMsg('');
+    setIsLoading(true);
+    try {
+      const user = await signInWithGoogle();
+      if (onGoogleLoginSuccess) {
+        onGoogleLoginSuccess(user);
+      }
+    } catch (err: unknown) {
+      console.error('Google Sign-In Failed:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('popup-closed-by-user')) {
+        setErrorMsg('Google sign-in encountered an error. Please try again.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle operator authentication
+  const handleOperatorLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      const cleanId = identifier.trim().toLowerCase();
+
+      // Find member by membershipId, phone, or email
+      const matched = members.find(
+        (m) =>
+          m.membershipId.toLowerCase() === cleanId ||
+          m.phone.replace(/\s+/g, '').includes(cleanId.replace(/\s+/g, '')) ||
+          m.email.toLowerCase() === cleanId ||
+          m.fullName.toLowerCase().includes(cleanId)
+      );
+
+      if (matched) {
+        onLoginSuccess(matched);
+      } else {
+        setErrorMsg('Invalid Membership ID, Phone Number or PIN. Please pick an operator below or use test credentials.');
+      }
+    }, 500);
+  };
+
+  // Handle administrator / executive authentication
+  const handleAdminLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      const cleanEmail = adminEmail.trim().toLowerCase();
+
+      const matched = ADMIN_USERS.find(
+        (a) =>
+          (a.email.toLowerCase() === cleanEmail || a.badgeNumber.toLowerCase() === cleanEmail) &&
+          a.password === adminPassword
+      );
+
+      if (matched && onAdminLoginSuccess) {
+        onAdminLoginSuccess(matched);
+      } else {
+        setErrorMsg('Invalid Directorate credentials. Please use the 1-click test credentials provided below.');
+      }
+    }, 500);
+  };
+
+  const handleQuickOperatorLogin = (member: Member) => {
+    setIdentifier(member.membershipId);
+    setPin('••••');
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      onLoginSuccess(member);
+    }, 300);
+  };
+
+  const handleQuickAdminLogin = (admin: typeof ADMIN_USERS[0]) => {
+    setAdminEmail(admin.email);
+    setAdminPassword(admin.password);
+    setIsLoading(true);
+    setTimeout(() => {
+      setIsLoading(false);
+      if (onAdminLoginSuccess) {
+        onAdminLoginSuccess(admin);
+      }
+    }, 300);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+      <div 
+        className="bg-white rounded-3xl max-w-lg w-full border border-[#E5E7EB] shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header with Title and Mode Switcher */}
+        <div className="bg-[#176B37] text-white px-6 pt-5 pb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center text-white shrink-0">
+                {activeTab === 'operator' ? (
+                  <Lock className="w-5 h-5 text-emerald-200" />
+                ) : (
+                  <ShieldAlert className="w-5 h-5 text-emerald-200" />
+                )}
+              </div>
+              <div>
+                <h3 className="font-bold text-lg leading-tight">
+                  {activeTab === 'operator' ? 'Member Portal Login' : 'Directorate & Executive Access'}
+                </h3>
+                <p className="text-xs text-emerald-100">
+                  {activeTab === 'operator'
+                    ? 'Access your operator dashboard, digital ID card & dues receipts'
+                    : 'Institutional governance, registry oversight & treasury audit'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Segmented Tab Switcher */}
+          <div className="flex bg-[#14532D] p-1 rounded-xl border border-white/10">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('operator');
+                setErrorMsg('');
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                activeTab === 'operator'
+                  ? 'bg-white text-[#176B37] shadow-sm'
+                  : 'text-emerald-100 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>POS Operator Login</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('admin');
+                setErrorMsg('');
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                activeTab === 'admin'
+                  ? 'bg-white text-[#176B37] shadow-sm'
+                  : 'text-emerald-100 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-500" />
+              <span>Executive & Super Admin</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 overflow-y-auto space-y-5 text-xs">
+          
+          {errorMsg && (
+            <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-red-800 flex items-start gap-2 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <span className="leading-tight">{errorMsg}</span>
+            </div>
+          )}
+
+          {/* TAB 1: POS OPERATOR LOGIN */}
+          {activeTab === 'operator' && (
+            <>
+              {/* Google One-Click Authentication */}
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 shadow-xs flex items-center justify-center gap-2.5 transition-all cursor-pointer hover:border-gray-400"
+              >
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                <span>Continue with Google Account</span>
+              </button>
+
+              <div className="relative flex items-center my-1">
+                <div className="flex-grow border-t border-gray-200"></div>
+                <span className="flex-shrink mx-2 text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or sign in with membership id</span>
+                <div className="flex-grow border-t border-gray-200"></div>
+              </div>
+
+              <form onSubmit={handleOperatorLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">
+                    Membership ID, Registered Phone, or Email *
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={identifier}
+                      onChange={(e) => setIdentifier(e.target.value)}
+                      placeholder="e.g. AMMON-LAG-2025-08492 or +234..."
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-gray-700">
+                      Account PIN or Password *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotNotice(!showForgotNotice)}
+                      className="text-[11px] text-[#176B37] hover:underline cursor-pointer"
+                    >
+                      Forgot PIN / ID?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      required
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value)}
+                      placeholder="Enter 4-digit PIN or password"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
+                    />
+                  </div>
+                </div>
+
+                {showForgotNotice && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-[11px] leading-relaxed">
+                    <strong>Credential Recovery:</strong> To recover your Membership ID or reset your PIN, 
+                    contact the AMMON National Secretariat via WhatsApp at <span className="font-mono font-bold">+234 (0) 800 266 6664</span> or 
+                    click any demo operator below to login instantly.
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between text-[11px] text-gray-600">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="w-3.5 h-3.5 text-[#176B37] rounded"
+                    />
+                    <span>Remember this terminal/device</span>
+                  </label>
+
+                  <span className="text-gray-400">AMMON Central Auth</span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-3 bg-[#176B37] hover:bg-[#14532D] text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <span>Authenticating Operator...</span>
+                  ) : (
+                    <>
+                      <span>Sign In to Member Portal</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Quick 1-Click Login As Registered Operator */}
+              <div className="pt-4 border-t border-[#E5E7EB] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-[#176B37]" />
+                    Quick Login As Demo Operator:
+                  </span>
+                  <span className="text-[10px] text-gray-400">One-click switcher</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {members.slice(0, 4).map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => handleQuickOperatorLogin(m)}
+                      className="p-2.5 rounded-xl border border-[#E5E7EB] hover:border-[#176B37] bg-gray-50/70 hover:bg-[#EAF3ED]/60 text-left transition-all duration-150 cursor-pointer group flex flex-col justify-between"
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-gray-900 group-hover:text-[#176B37] truncate text-xs">
+                          {m.fullName}
+                        </span>
+                        <span className="text-[9px] bg-white px-1.5 py-0.5 rounded border border-gray-200 text-gray-600 font-mono">
+                          {m.state}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-gray-500 truncate mt-0.5">
+                        {m.businessName}
+                      </div>
+                      <div className="text-[9px] font-mono text-[#176B37] font-semibold mt-1">
+                        {m.membershipId}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Register Prompt */}
+              <div className="pt-3 border-t border-[#E5E7EB] text-center">
+                <p className="text-gray-600 text-xs">
+                  Not yet a registered AMMON operator?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenRegister();
+                    }}
+                    className="font-bold text-[#176B37] hover:underline cursor-pointer"
+                  >
+                    Register Your POS Kiosk Now →
+                  </button>
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* TAB 2: EXECUTIVE & SUPER ADMIN LOGIN */}
+          {activeTab === 'admin' && (
+            <div className="space-y-4">
+              
+              {/* Highlighted Test Credentials Box */}
+              <div className="bg-[#EAF3ED] border border-[#176B37]/30 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-[#176B37]/20 pb-2">
+                  <div className="flex items-center gap-1.5 text-[#14532D] font-bold text-xs uppercase tracking-wide">
+                    <ShieldCheck className="w-4 h-4 text-[#176B37]" />
+                    <span>Official Test Credentials</span>
+                  </div>
+                  <span className="text-[10px] bg-white px-2 py-0.5 rounded font-bold text-[#176B37] border border-[#176B37]/20">
+                    Pre-Configured
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2.5">
+                  {/* Super Admin Card */}
+                  <div className="bg-white p-3 rounded-xl border border-amber-200/80 shadow-xs flex flex-col justify-between">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <Crown className="w-3.5 h-3.5 text-amber-500" />
+                          <span className="font-bold text-xs text-gray-900">Dr. Victor O. Babatunde</span>
+                        </div>
+                        <p className="text-[11px] text-gray-500">National President & Registrar-General</p>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-gray-600">
+                          <span>Email: <strong className="text-gray-900">superadmin@ammon.ng</strong></span>
+                          <span>Pass: <strong className="text-gray-900">admin2025</strong></span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] bg-amber-50 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-200 shrink-0">
+                        SUPER ADMIN
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleQuickAdminLogin(ADMIN_USERS[0])}
+                      className="mt-2.5 w-full py-1.5 bg-[#176B37] hover:bg-[#14532D] text-white rounded-lg font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-300" />
+                      <span>⚡ One-Click Login as Super Admin</span>
+                    </button>
+                  </div>
+
+                  {/* Executive Officer Card */}
+                  <div className="bg-white p-3 rounded-xl border border-[#176B37]/25 shadow-xs flex flex-col justify-between">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <Briefcase className="w-3.5 h-3.5 text-[#176B37]" />
+                          <span className="font-bold text-xs text-gray-900">Alhaji Babaginda O. Sani</span>
+                        </div>
+                        <p className="text-[11px] text-gray-500">National Secretary General</p>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-gray-600">
+                          <span>Email: <strong className="text-gray-900">executive@ammon.ng</strong></span>
+                          <span>Pass: <strong className="text-gray-900">exec2025</strong></span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] bg-emerald-50 text-[#176B37] font-bold px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">
+                        EXECUTIVE
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleQuickAdminLogin(ADMIN_USERS[1])}
+                      className="mt-2.5 w-full py-1.5 bg-[#14532D] hover:bg-[#0f3d20] text-white rounded-lg font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3 text-emerald-300" />
+                      <span>⚡ One-Click Login as Executive Officer</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Google Authentication for Directorate */}
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 shadow-xs flex items-center justify-center gap-2.5 transition-all cursor-pointer hover:border-gray-400"
+              >
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+                <span>Google Single Sign-On (Officer Email)</span>
+              </button>
+
+              <div className="relative flex items-center my-1">
+                <div className="flex-grow border-t border-gray-200"></div>
+                <span className="flex-shrink mx-2 text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or sign in with directorate credentials</span>
+                <div className="flex-grow border-t border-gray-200"></div>
+              </div>
+
+              {/* Standard Admin Form */}
+              <form onSubmit={handleAdminLoginSubmit} className="space-y-3 pt-1">
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">
+                    Institutional Email or Badge ID *
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={adminEmail}
+                      onChange={(e) => setAdminEmail(e.target.value)}
+                      placeholder="e.g. superadmin@ammon.ng or AMMON-HQ-001"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-gray-700 mb-1">
+                    Administrative Password *
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      required
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-3 bg-[#176B37] hover:bg-[#14532D] text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <span>Verifying Directorate Clearance...</span>
+                  ) : (
+                    <>
+                      <span>Enter Executive Dashboard</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="p-3 bg-gray-50 rounded-xl border border-[#E5E7EB] text-[11px] text-gray-600 flex items-center gap-2">
+                <Lock className="w-4 h-4 text-[#176B37] shrink-0" />
+                <span>All administrative sessions are signed with HMAC cryptographic audit tokens.</span>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+};

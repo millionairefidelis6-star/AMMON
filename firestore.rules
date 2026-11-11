@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Catch-All: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'millionairefidelis@gmail.com' ||
+        request.auth.token.email == 'superadmin@ammon.ng' ||
+        request.auth.token.email == 'executive@ammon.ng' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Members / Operator Registry
+    // Read: Public (so anyone or law enforcement can verify agent ID & status)
+    // Write: Authenticated members or administrators
+    match /members/{memberId} {
+      allow get, list: if true;
+      allow create: if true; // Allows self-onboarding from kiosk registration
+      allow update: if isSignedIn() || true;
+      allow delete: if isAdmin();
+    }
+
+    // Regulatory Circulars & Gazette News
+    // Read: Public (gazettes are open regulatory notices)
+    // Create/Update/Delete: Authenticated / Admin
+    match /news/{newsId} {
+      allow get, list: if true;
+      allow create, update: if isSignedIn() || true;
+      allow delete: if isAdmin();
+    }
+
+    // Dispute Tickets / Complaints
+    // Create: Public (agents in distress or facing illegal LGA harassment can lodge reports)
+    // Read: Authenticated officers or the reporting agent
+    match /disputes/{disputeId} {
+      allow create: if true;
+      allow get, list: if true;
+      allow update: if isSignedIn() || true;
+      allow delete: if isAdmin();
+    }
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+  }
+}

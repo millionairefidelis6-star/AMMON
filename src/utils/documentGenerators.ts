@@ -78,16 +78,33 @@ export async function downloadDigitalCardPng(member: Member) {
   ctx.font = 'bold 18px sans-serif';
   ctx.fillText('VERIFIED ACTIVE', canvas.width - 195, 68);
 
-  // Logo emblem circle on top left
+  // Load and draw official AMMON Logo on top left
+  const logoImg = new Image();
+  logoImg.crossOrigin = 'anonymous';
+  logoImg.src = '/assets/images/ammon_logo.jpg';
+  try {
+    await new Promise<void>((resolve) => {
+      logoImg.onload = () => resolve();
+      logoImg.onerror = () => resolve();
+      setTimeout(resolve, 300);
+    });
+  } catch {}
+
+  // Logo emblem badge box on top left
   ctx.fillStyle = '#FFFFFF';
   ctx.beginPath();
-  ctx.arc(75, 69, 42, 0, Math.PI * 2);
+  ctx.roundRect(32, 26, 90, 86, 12);
   ctx.fill();
-  ctx.fillStyle = '#176B37';
-  ctx.font = 'bold 24px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('AM', 75, 78);
-  ctx.textAlign = 'left';
+
+  if (logoImg.complete && logoImg.naturalWidth > 0) {
+    ctx.drawImage(logoImg, 37, 30, 80, 78);
+  } else {
+    ctx.fillStyle = '#176B37';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('AMMON', 77, 78);
+    ctx.textAlign = 'left';
+  }
 
   // Photo Box on Left
   const photoX = 50;
@@ -263,9 +280,12 @@ export function printDigitalCardDocument(member: Member) {
     <!-- FRONT -->
     <div class="card">
       <div class="card-top">
-        <div>
-          <h3>AMMON NIGERIA</h3>
-          <p>Official Digital Operator Credential</p>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <img src="/assets/images/ammon_logo.jpg" alt="AMMON" style="height:38px; width:38px; object-fit:contain; background:#fff; border-radius:6px; padding:2px;" />
+          <div>
+            <h3>AMMON NIGERIA</h3>
+            <p>Official Digital Operator Credential • RC 80540</p>
+          </div>
         </div>
         <div class="badge">ACTIVE MEMBER</div>
       </div>
@@ -656,6 +676,7 @@ export function downloadAcademyCertificate(member: Member) {
 
     <div class="cert-frame">
       <div class="inner-border">
+        <img src="/assets/images/ammon_logo.jpg" alt="AMMON" style="height:60px; object-fit:contain; margin-bottom:10px; background:#fff; padding:4px; border-radius:8px;" />
         <div class="cert-hdr">Association of Mobile Money Operators of Nigeria</div>
         <h1>CERTIFICATE OF PROFESSIONAL COMPETENCY</h1>
         <div class="sub">National Agent Banking Safety & Anti-Fraud Accreditation</div>
@@ -730,9 +751,12 @@ export function downloadCircularDocument(article: NewsArticle) {
   </div>
 
   <div class="hdr">
-    <div>
-      <h2>AMMON NATIONAL SECRETARIAT</h2>
-      <p style="margin:2px 0 0; font-size:11px; color:#666;">Plot 14 Commercial Ave, Yaba, Lagos</p>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <img src="/assets/images/ammon_logo.jpg" alt="AMMON" style="height:44px; width:44px; object-fit:contain; background:#fff; border-radius:6px; padding:2px;" />
+      <div>
+        <h2>AMMON NATIONAL SECRETARIAT</h2>
+        <p style="margin:2px 0 0; font-size:11px; color:#666;">Association of Mobile Money Operators • RC 80540</p>
+      </div>
     </div>
     <div class="badge">${article.category.toUpperCase()}</div>
   </div>

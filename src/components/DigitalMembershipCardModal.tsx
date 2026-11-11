@@ -109,7 +109,7 @@ export const DigitalMembershipCardModal: React.FC<DigitalMembershipCardModalProp
                 {/* Card Top Band */}
                 <div className="flex items-start justify-between border-b border-[#176B37]/15 pb-3 relative z-10">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-full bg-[#176B37] flex items-center justify-center text-white shrink-0 shadow-xs">
+                    <div className="w-9 h-9 rounded-lg bg-white p-0.5 border border-[#176B37]/20 flex items-center justify-center shrink-0 shadow-2xs">
                       <AmmonLogo variant="compact" />
                     </div>
                     <div>

@@ -8,9 +8,9 @@
   "theme_color": "#176B37",
   "icons": [
     {
-      "src": "/assets/aistudio/file_0000000035fc82108dac8fb586cc0e31_2df36242.png",
+      "src": "/assets/images/ammon_logo.jpg",
       "sizes": "192x192 512x512",
-      "type": "image/png"
+      "type": "image/jpeg"
     }
   ]
 }

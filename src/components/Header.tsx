@@ -98,25 +98,25 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="w-full bg-[#FFFFFF] border-b border-[#E5E7EB] sticky top-0 z-40 shadow-xs header-dropdown-container">
+    <header className="w-full max-w-full bg-[#FFFFFF] border-b border-[#E5E7EB] sticky top-0 z-40 shadow-xs header-dropdown-container">
       {/* Main Single-Line Header Bar */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3">
-        <div className="flex items-center justify-between gap-2 sm:gap-4">
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-2 sm:py-3">
+        <div className="flex items-center justify-between gap-1.5 sm:gap-3 min-w-0">
           
           {/* Left: AMMON Logo Lockup */}
           <div 
             onClick={() => handleNavClick('home')}
-            className="cursor-pointer shrink-0"
+            className="cursor-pointer shrink-0 min-w-0"
             title="Association of Mobile Money Operators of Nigeria"
           >
             <AmmonLogo />
           </div>
 
           {/* Center: Desktop Navigation Links */}
-          <nav className="hidden xl:flex items-center gap-1 text-sm font-medium text-[#252525]">
+          <nav className="hidden xl:flex items-center gap-1 text-sm font-medium text-[#252525] min-w-0">
             <button
               onClick={() => handleNavClick('home')}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                 activeNav === 'home'
                   ? 'bg-[#176B37] text-white shadow-xs'
                   : 'text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/60'
@@ -129,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="relative group">
               <button 
                 onClick={() => setActiveDropdown(activeDropdown === 'about' ? null : 'about')}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <span>About Us</span>
                 <ChevronDown className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#176B37] transition-transform" />
@@ -151,7 +151,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Membership */}
             <div className="relative group">
               <button 
-                className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <span>Membership</span>
                 <ChevronDown className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#176B37]" />
@@ -172,21 +172,21 @@ export const Header: React.FC<HeaderProps> = ({
             {/* News & Announcements */}
             <button
               onClick={() => handleNavClick('news')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
                 activeNav === 'news'
                   ? 'text-[#176B37] font-semibold bg-[#EAF3ED]'
                   : 'text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40'
               }`}
             >
-              News & Announcements
+              News
             </button>
 
             {/* State Chapters */}
             <div className="relative group">
               <button 
-                className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer whitespace-nowrap"
               >
-                <span>State Chapters</span>
+                <span>Chapters</span>
                 <ChevronDown className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#176B37]" />
               </button>
               <div className="absolute top-full left-0 mt-1 w-72 bg-white rounded-xl shadow-lg border border-[#E5E7EB] py-2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-150 z-50">
@@ -206,7 +206,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Resources / Academy */}
             <button
               onClick={() => handleNavClick('academy')}
-              className="px-3 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer"
+              className="px-2.5 py-1.5 rounded-md text-xs font-medium text-[#252525] hover:text-[#176B37] hover:bg-[#EAF3ED]/40 transition-colors cursor-pointer whitespace-nowrap"
             >
               Academy
             </button>
@@ -214,22 +214,22 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Complaints Desk */}
             <button
               onClick={onOpenDispute}
-              className="px-3 py-1.5 rounded-md text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer"
+              className="px-2.5 py-1.5 rounded-md text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors cursor-pointer whitespace-nowrap"
             >
-              Dispute Desk
+              Disputes
             </button>
           </nav>
 
           {/* Right: Side-by-side icons on the SAME LINE as dashboard icon */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          <div className="flex items-center justify-end gap-1 sm:gap-2 shrink-0">
             
             {/* 1. Location Icon & Text (Lagos, Nigeria) */}
             <div 
-              className="flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-xs font-semibold text-[#176B37] bg-[#EAF3ED] px-2 sm:px-2.5 py-1.5 rounded-full border border-emerald-200 shadow-2xs shrink-0 select-none"
+              className="flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-[#176B37] bg-[#EAF3ED] px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-full border border-emerald-200 shadow-2xs shrink-0 select-none"
               title="AMMON National Headquarters - Lagos, Nigeria"
             >
-              <MapPin className="w-3.5 h-3.5 text-[#176B37] shrink-0" />
-              <span>Lagos<span className="hidden sm:inline">, Nigeria</span></span>
+              <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#176B37] shrink-0" />
+              <span className="leading-none">Lagos<span className="hidden md:inline">, Nigeria</span></span>
             </div>
 
             {/* 2. Notification Icon (Bell with Badge) */}
@@ -242,7 +242,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setMemberMenuOpen(false);
                   setGoogleMenuOpen(false);
                 }}
-                className={`relative p-1.5 sm:p-2 rounded-full transition-colors border cursor-pointer shadow-2xs ${
+                className={`relative w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-colors border cursor-pointer shadow-2xs ${
                   notificationOpen
                     ? 'bg-[#EAF3ED] text-[#176B37] border-emerald-300'
                     : 'bg-white text-gray-700 hover:text-[#176B37] hover:bg-[#EAF3ED] border-gray-200'
@@ -250,8 +250,8 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label="View announcements"
                 title="Official AMMON Announcements & Circulars"
               >
-                <Bell className="w-4 h-4" />
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full flex items-center justify-center border border-white">
                   2
                 </span>
               </button>
@@ -259,7 +259,7 @@ export const Header: React.FC<HeaderProps> = ({
               {notificationOpen && (
                 <div 
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute right-0 mt-2 w-72 sm:w-80 bg-white text-[#252525] rounded-xl shadow-2xl border border-[#E5E7EB] py-2 z-50 animate-in fade-in zoom-in-95 duration-150"
+                  className="fixed inset-x-3 top-[68px] sm:inset-x-auto sm:top-auto sm:absolute sm:right-0 sm:mt-2 sm:w-80 bg-white text-[#252525] rounded-xl shadow-2xl border border-[#E5E7EB] py-2 z-50 animate-in fade-in zoom-in-95 duration-150"
                 >
                   <div className="px-4 py-2 border-b border-[#E5E7EB] flex items-center justify-between">
                     <span className="font-bold text-xs uppercase tracking-wider text-[#176B37]">Official Notices</span>
@@ -300,7 +300,7 @@ export const Header: React.FC<HeaderProps> = ({
                     setMemberMenuOpen(false);
                     setGoogleMenuOpen(false);
                   }}
-                  className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-full text-[11px] sm:text-xs font-bold cursor-pointer transition-all border shadow-2xs ${
+                  className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-bold cursor-pointer transition-all border shadow-2xs ${
                     adminUser.role === 'Super Admin'
                       ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
                       : 'bg-emerald-50 hover:bg-emerald-100 text-[#176B37] border-emerald-300'
@@ -308,25 +308,28 @@ export const Header: React.FC<HeaderProps> = ({
                   title={`${adminUser.title} (${adminUser.role}) - Click to switch persona`}
                 >
                   {adminUser.role === 'Super Admin' ? (
-                    <Crown className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <Crown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-600 shrink-0" />
                   ) : (
-                    <Briefcase className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                    <Briefcase className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-700 shrink-0" />
                   )}
-                  <span className="truncate max-w-[65px] sm:max-w-[100px]">
+                  <span className="sm:hidden leading-none">
+                    {adminUser.role === 'Super Admin' ? 'Admin' : 'Exec'}
+                  </span>
+                  <span className="hidden sm:inline truncate max-w-[95px] leading-none">
                     {adminUser.role === 'Super Admin' ? 'Super Admin' : 'Executive'}
                   </span>
-                  <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
+                  <ChevronDown className="w-2.5 h-2.5 sm:w-3 sm:h-3 opacity-70 shrink-0" />
                 </button>
 
                 {adminMenuOpen && (
                   <div 
                     onClick={(e) => e.stopPropagation()}
-                    className="absolute right-0 mt-2 w-68 sm:w-72 bg-white text-[#252525] rounded-xl shadow-2xl border border-[#E5E7EB] py-2 z-50 animate-in fade-in zoom-in-95 duration-150"
+                    className="fixed inset-x-3 top-[68px] sm:inset-x-auto sm:top-auto sm:absolute sm:right-0 sm:mt-2 sm:w-72 bg-white text-[#252525] rounded-xl shadow-2xl border border-[#E5E7EB] py-2 z-50 animate-in fade-in zoom-in-95 duration-150"
                   >
                     <div className="px-4 py-2 border-b border-gray-100">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-xs text-[#252525] truncate">{adminUser.fullName}</span>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${
                           adminUser.role === 'Super Admin'
                             ? 'bg-amber-50 text-amber-800 border-amber-200'
                             : 'bg-emerald-50 text-[#176B37] border-emerald-200'
@@ -396,17 +399,17 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <button
                 onClick={onOpenAdmin}
-                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-full text-[11px] sm:text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shrink-0 shadow-2xs"
+                className="flex items-center gap-1 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shrink-0 shadow-2xs"
                 title="Directorate Login / Test Persona"
               >
-                <Crown className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span className="hidden xs:inline">Admin</span>
+                <Crown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-600 shrink-0" />
+                <span>Admin</span>
               </button>
             )}
 
             {/* Authenticated Member Pill (if logged in) */}
             {loggedInMember && (
-              <div className="relative shrink-0 hidden sm:block">
+              <div className="relative shrink-0 hidden md:block">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -459,7 +462,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Google Verified Account Indicator (if signed in) */}
             {firebaseUser && (
-              <div className="relative shrink-0 hidden sm:block">
+              <div className="relative shrink-0 hidden md:block">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -540,21 +543,21 @@ export const Header: React.FC<HeaderProps> = ({
                   onOpenAdmin();
                 }
               }}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold bg-[#176B37] text-white hover:bg-[#14532D] shadow-2xs transition-colors cursor-pointer shrink-0"
+              className="w-7 h-7 sm:w-auto sm:px-3 sm:py-1.5 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold bg-[#176B37] text-white hover:bg-[#14532D] shadow-2xs transition-colors cursor-pointer shrink-0"
               title="Open AMMON Directorate & Member Dashboard"
               aria-label="Dashboard"
             >
-              <LayoutDashboard className="w-4 h-4 shrink-0 text-white" />
+              <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-white" />
               <span className="hidden md:inline">Dashboard</span>
             </button>
 
             {/* 5. Mobile Navigation Menu Toggle */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="xl:hidden p-1.5 sm:p-2 text-gray-700 hover:text-[#176B37] hover:bg-[#EAF3ED] border border-gray-200 rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
+              className="xl:hidden w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center text-gray-700 hover:text-[#176B37] hover:bg-[#EAF3ED] border border-gray-200 rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
               aria-label="Toggle Navigation Menu"
             >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {mobileMenuOpen ? <X className="w-4 h-4 sm:w-5 sm:h-5" /> : <Menu className="w-4 h-4 sm:w-5 sm:h-5" />}
             </button>
 
           </div>

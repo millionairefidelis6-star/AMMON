@@ -279,12 +279,13 @@ export default function App() {
   };
 
   // Authentication Handlers
-  const handleOpenLogin = (tab: 'operator' | 'admin' = 'operator') => {
-    setLoginModalTab(tab);
-    if (tab === 'operator' && loggedInMember) {
+  const handleOpenLogin = (tab?: 'operator' | 'admin') => {
+    const resolvedTab: 'operator' | 'admin' = tab === 'admin' ? 'admin' : 'operator';
+    setLoginModalTab(resolvedTab);
+    if (resolvedTab === 'operator' && loggedInMember) {
       setCurrentMember(loggedInMember);
       setShowPortalModal(true);
-    } else if (tab === 'admin' && adminUser) {
+    } else if (resolvedTab === 'admin' && adminUser) {
       setShowAdminModal(true);
     } else {
       setShowLoginModal(true);
@@ -358,32 +359,32 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FFFFFF] text-[#252525] flex flex-col font-sans selection:bg-[#EAF3ED] selection:text-[#176B37]">
+    <div className="min-h-screen w-full max-w-full overflow-x-clip bg-[#FFFFFF] text-[#252525] flex flex-col font-sans selection:bg-[#EAF3ED] selection:text-[#176B37]">
       
       {/* PWA Institutional Install Strip */}
       {pwaBannerVisible && (
-        <div className="bg-[#14532D] text-white text-[11px] py-1.5 px-4 sm:px-8 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2 max-w-2xl truncate">
+        <div className="bg-[#14532D] text-white text-[11px] py-1.5 px-3 sm:px-8 border-b border-white/10 flex items-center justify-between gap-2 w-full">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
             <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-            <span className="font-semibold">AMMON Digital PWA Identity:</span>
-            <span className="hidden sm:inline text-emerald-100 truncate">
-              Install the official AMMON Web App for offline digital membership cards & fast credential verification.
+            <span className="font-semibold truncate">AMMON Digital PWA Identity</span>
+            <span className="hidden md:inline text-emerald-100 truncate">
+              — Install the official AMMON Web App for offline digital membership cards & fast credential verification.
             </span>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <button
               onClick={() => {
                 alert('AMMON Progressive Web App added to home screen!');
                 setPwaBannerVisible(false);
               }}
-              className="bg-white/15 hover:bg-white/25 text-white font-semibold px-2.5 py-0.5 rounded text-[10px] transition-colors cursor-pointer"
+              className="bg-white/15 hover:bg-white/25 text-white font-semibold px-2 sm:px-2.5 py-0.5 rounded text-[10px] transition-colors cursor-pointer whitespace-nowrap"
             >
               Add to Home Screen
             </button>
             <button
               onClick={() => setPwaBannerVisible(false)}
-              className="text-white/60 hover:text-white p-0.5"
+              className="text-white/60 hover:text-white p-0.5 cursor-pointer"
               aria-label="Dismiss banner"
             >
               <X className="w-3.5 h-3.5" />
@@ -438,7 +439,7 @@ export default function App() {
         {/* Hero Section matching reference */}
         <Hero
           onOpenRegister={() => setShowRegisterModal(true)}
-          onOpenLogin={handleOpenLogin}
+          onOpenLogin={() => handleOpenLogin('operator')}
         />
 
         {/* Quick Action Bar (6 core services with primary green badges) */}

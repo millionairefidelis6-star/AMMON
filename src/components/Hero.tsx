@@ -51,11 +51,11 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
           
           {/* Left Column: Institutional Typography & Action Callouts */}
-          <div className="lg:col-span-6 flex flex-col justify-center space-y-6">
+          <div className="lg:col-span-6 flex flex-col justify-center space-y-5 sm:space-y-6 min-w-0">
             
             {/* Main Headline */}
             <div className="space-y-1">
-              <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-[46px] font-black tracking-tight text-[#252525] uppercase leading-[1.08]">
+              <h1 className="text-[26px] sm:text-4xl md:text-5xl lg:text-[46px] font-black tracking-tight text-[#252525] uppercase leading-[1.08] break-words">
                 <span>ONE ASSOCIATION.</span>
                 <br />
                 <span>ONE VOICE.</span>
@@ -67,16 +67,16 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
             </div>
 
             {/* Subtitle Description */}
-            <p className="text-base sm:text-lg text-[#252525]/80 font-normal leading-relaxed max-w-xl">
+            <p className="text-sm sm:text-lg text-[#252525]/80 font-normal leading-relaxed max-w-xl">
               Connecting, empowering and representing Nigeria&apos;s mobile money operators, 
               POS agents and fintech ecosystem across all 774 local government areas.
             </p>
 
             {/* CTA Buttons */}
-            <div className="flex flex-wrap items-center gap-4 pt-2">
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4 pt-1 sm:pt-2">
               <button
                 onClick={onOpenRegister}
-                className="inline-flex items-center gap-2 bg-[#176B37] hover:bg-[#14532D] text-white font-semibold text-sm sm:text-base px-7 py-3.5 rounded-full shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer group"
+                className="inline-flex items-center gap-2 bg-[#176B37] hover:bg-[#14532D] text-white font-semibold text-sm sm:text-base px-5 sm:px-7 py-3 sm:py-3.5 rounded-full shadow-md hover:shadow-lg transition-all duration-200 cursor-pointer group"
               >
                 <span>Become a Member</span>
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -84,7 +84,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
 
               <button
                 onClick={onOpenLogin}
-                className="inline-flex items-center gap-2 bg-white hover:bg-[#EAF3ED] text-[#176B37] border-2 border-[#176B37] font-semibold text-sm sm:text-base px-6 py-3 rounded-full transition-all duration-200 cursor-pointer shadow-xs"
+                className="inline-flex items-center gap-2 bg-white hover:bg-[#EAF3ED] text-[#176B37] border-2 border-[#176B37] font-semibold text-sm sm:text-base px-5 sm:px-6 py-2.5 sm:py-3 rounded-full transition-all duration-200 cursor-pointer shadow-xs"
               >
                 <User className="w-4 h-4 text-[#176B37]" />
                 <span>Member Login</span>
@@ -92,17 +92,17 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
             </div>
 
             {/* Institutional Trust Badges */}
-            <div className="pt-4 border-t border-[#E5E7EB] flex flex-wrap items-center gap-6 text-xs text-[#252525]/70">
+            <div className="pt-4 border-t border-[#E5E7EB] flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-[#252525]/70">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[#176B37]" />
+                <CheckCircle2 className="w-4 h-4 text-[#176B37] shrink-0" />
                 <span className="font-medium">148,000+ Registered POS Agents</span>
               </div>
               <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-[#176B37]" />
+                <Shield className="w-4 h-4 text-[#176B37] shrink-0" />
                 <span className="font-medium">CBN Regulatory Recognised</span>
               </div>
               <div className="flex items-center gap-2">
-                <Award className="w-4 h-4 text-[#176B37]" />
+                <Award className="w-4 h-4 text-[#176B37] shrink-0" />
                 <span className="font-medium">36 States & FCT Chapters</span>
               </div>
             </div>
@@ -110,7 +110,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
           </div>
 
           {/* Right Column: Hero Visual Asset & Floating Nigeria Badge */}
-          <div className="lg:col-span-6 relative">
+          <div className="lg:col-span-6 relative min-w-0">
             <div className="relative rounded-2xl overflow-hidden shadow-xl border border-[#E5E7EB] aspect-4/3 sm:aspect-16/10 bg-slate-100">
               {/* Active Image */}
               <img
@@ -127,18 +127,18 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
 
               {/* Floating "Together for a Digital Nigeria" Brand Badge with Nigeria silhouette */}
-              <div className="absolute top-4 right-4 sm:top-6 sm:right-6 bg-[#176B37] text-white p-3.5 sm:p-4 rounded-xl shadow-lg border border-white/20 flex items-center gap-3 backdrop-blur-xs">
+              <div className="absolute top-3 right-3 sm:top-6 sm:right-6 max-w-[calc(100%-1.5rem)] bg-[#176B37] text-white p-2.5 sm:p-4 rounded-xl shadow-lg border border-white/20 flex items-center gap-2.5 sm:gap-3 backdrop-blur-xs">
                 {/* Nigeria Map Icon / Shield */}
-                <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                  <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current text-white" xmlns="http://www.w3.org/2000/svg">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 sm:w-5 sm:h-5 fill-current text-white" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.4z" />
                   </svg>
                 </div>
-                <div>
-                  <div className="text-xs sm:text-sm font-bold tracking-tight leading-tight">
+                <div className="min-w-0">
+                  <div className="text-[11px] sm:text-sm font-bold tracking-tight leading-tight truncate">
                     Together for a Digital Nigeria
                   </div>
-                  <div className="text-[10px] text-emerald-100 font-medium">
+                  <div className="text-[9px] sm:text-[10px] text-emerald-100 font-medium truncate">
                     National Agent Banking Charter
                   </div>
                 </div>

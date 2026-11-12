@@ -35,6 +35,11 @@ import {
 import { Member, NewsArticle, DisputeTicket, AdminUser } from '../types';
 import { NIGERIAN_STATES, ADMIN_USERS } from '../data/mockData';
 import { AmmonLogo } from './AmmonLogo';
+import {
+  DASHBOARD_SERVICES_MENU,
+  DashboardServicesWorkspace,
+  ServiceSectionId,
+} from './DashboardServicesWorkspace';
 
 export type AdminSection = 
   | 'overview'
@@ -44,7 +49,8 @@ export type AdminSection =
   | 'finance'
   | 'chapters'
   | 'academy'
-  | 'security';
+  | 'security'
+  | ServiceSectionId;
 
 interface AdminDashboardModalProps {
   adminUser?: AdminUser;
@@ -330,8 +336,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           </div>
 
           {/* Left-Justified Navigation Menu List */}
-          <div className="flex-1 overflow-y-auto py-3 px-3 space-y-1">
-            <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-2">
+          <div className="flex-1 overflow-y-auto py-3 px-3 space-y-1 text-left">
+            <span className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-2 text-left">
               National Administrative Council
             </span>
 
@@ -346,7 +352,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     setSidebarOpenMobile(false);
                   }}
                   className={`
-                    w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left text-xs font-semibold
+                    w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-semibold
                     transition-all duration-150 cursor-pointer group
                     ${isActive 
                       ? 'bg-[#176B37] text-white shadow-xs' 
@@ -360,7 +366,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     `}>
                       <Icon className="w-4 h-4" />
                     </div>
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate text-left">{item.label}</span>
                   </div>
 
                   <span className={`
@@ -372,6 +378,51 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                 </button>
               );
             })}
+
+            {/* Left-Justified Identity, PINs & Bill Services Group */}
+            <div className="pt-3 mt-3 border-t border-gray-100 space-y-1">
+              <span className="px-3 text-[10px] font-bold text-[#176B37] uppercase tracking-wider block mb-1.5 text-left">
+                Verification, PINs &amp; Bill Services
+              </span>
+
+              {DASHBOARD_SERVICES_MENU.map((service) => {
+                const SIcon = service.icon;
+                const isActive = activeSection === service.id;
+                return (
+                  <button
+                    key={service.id}
+                    onClick={() => {
+                      setActiveSection(service.id);
+                      setSidebarOpenMobile(false);
+                    }}
+                    className={`
+                      w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-semibold
+                      transition-all duration-150 cursor-pointer group
+                      ${isActive 
+                        ? 'bg-[#176B37] text-white shadow-xs' 
+                        : 'text-[#252525] hover:bg-[#EAF3ED] hover:text-[#176B37]'}
+                    `}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`
+                        w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors
+                        ${isActive ? 'bg-white/20 text-white' : 'bg-[#EAF3ED]/70 text-[#176B37] group-hover:bg-white'}
+                      `}>
+                        <SIcon className="w-4 h-4" />
+                      </div>
+                      <span className="truncate text-left">{service.label}</span>
+                    </div>
+
+                    <span className={`
+                      text-[9px] px-2 py-0.5 rounded-full font-medium shrink-0 ml-1
+                      ${isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600 group-hover:bg-white group-hover:text-[#176B37]'}
+                    `}>
+                      {service.badge}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Sidebar Bottom Actions */}
@@ -424,7 +475,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                 <span className="text-gray-400 font-medium hidden sm:inline">AMMON Directorate</span>
                 <span className="text-gray-400 hidden sm:inline">/</span>
                 <h2 className="text-sm sm:text-base font-bold text-[#252525]">
-                  {navItems.find((n) => n.id === activeSection)?.label}
+                  {navItems.find((n) => n.id === activeSection)?.label ||
+                    DASHBOARD_SERVICES_MENU.find((s) => s.id === activeSection)?.label}
                 </h2>
               </div>
             </div>
@@ -577,6 +629,42 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                       All state chapters are instructed to enforce the newly published 2025 Tariff Board counter posters 
                       at every neighborhood kiosk to prevent consumer price gouging.
                     </p>
+                  </div>
+
+                  {/* Quick-Access Verification, PINs & Utility Services Grid (Left-Justified) */}
+                  <div className="bg-white p-5 rounded-2xl border border-[#E5E7EB] shadow-xs space-y-3 text-left">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider text-left">
+                        Digital Verification, PINs &amp; Utility Services
+                      </h4>
+                      <span className="text-[10px] font-semibold text-[#176B37] bg-[#EAF3ED] px-2 py-0.5 rounded-full">
+                        8 Active Gateways
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {DASHBOARD_SERVICES_MENU.map((service) => {
+                        const SIcon = service.icon;
+                        return (
+                          <button
+                            key={service.id}
+                            onClick={() => setActiveSection(service.id)}
+                            className="p-3 rounded-xl border border-[#E5E7EB] bg-[#F9FBFA] hover:bg-[#EAF3ED] hover:border-[#176B37] text-left transition-all cursor-pointer group flex items-start gap-2.5"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-white border border-[#E5E7EB] text-[#176B37] group-hover:bg-[#176B37] group-hover:text-white flex items-center justify-center shrink-0 transition-colors">
+                              <SIcon className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 text-left">
+                              <p className="font-bold text-xs text-[#252525] group-hover:text-[#176B37] truncate">
+                                {service.label}
+                              </p>
+                              <p className="text-[10px] text-gray-500 truncate mt-0.5">
+                                {service.shortDesc}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                 </div>
@@ -1094,6 +1182,19 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* 9. DIGITAL VERIFICATION, ATTESTATION, PINS & BILL PAYMENT SERVICES */}
+              {DASHBOARD_SERVICES_MENU.some((s) => s.id === activeSection) && (
+                <DashboardServicesWorkspace
+                  activeService={activeSection as ServiceSectionId}
+                  operatorName={adminUser.fullName}
+                  operatorId={adminUser.badgeNumber}
+                  businessOrTitle={adminUser.title}
+                  stateLocation="Lagos"
+                  roleLabel={adminUser.role}
+                  onSelectService={(id) => setActiveSection(id)}
+                />
               )}
 
             </div>

@@ -50,9 +50,9 @@ export const AmmonLogo: React.FC<AmmonLogoProps> = ({ className = '', variant = 
   }
 
   return (
-    <div className={`flex items-center gap-3 select-none ${className}`}>
+    <div className={`flex items-center gap-1.5 sm:gap-3 select-none min-w-0 ${className}`}>
       {/* Official AMMON Emblem Image */}
-      <div className="relative shrink-0 flex items-center justify-center h-11 w-11 sm:h-12 sm:w-12 bg-white rounded-xl p-1 border border-[#E5E7EB] shadow-xs">
+      <div className="relative shrink-0 flex items-center justify-center h-8 w-8 sm:h-11 sm:w-11 bg-white rounded-lg sm:rounded-xl p-0.5 sm:p-1 border border-[#E5E7EB] shadow-xs">
         <img
           src="/assets/images/ammon_logo.jpg"
           alt="AMMON Official Logo"
@@ -62,20 +62,23 @@ export const AmmonLogo: React.FC<AmmonLogoProps> = ({ className = '', variant = 
       </div>
 
       {/* Typography */}
-      <div className="flex flex-col justify-center">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col justify-center min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <span 
-            className="font-extrabold tracking-tight text-xl sm:text-2xl leading-none font-sans"
+            className="font-extrabold tracking-tight text-base sm:text-xl md:text-2xl leading-none font-sans"
             style={{ color: primaryColor }}
           >
             AMMON
           </span>
-          <span className="text-[9px] font-bold font-mono px-1.5 py-0.2 rounded bg-[#EAF3ED] text-[#176B37] border border-[#176B37]/20">
+          <span className="hidden sm:inline-block text-[9px] font-bold font-mono px-1.5 py-0.5 rounded bg-[#EAF3ED] text-[#176B37] border border-[#176B37]/20 shrink-0">
             RC 80540
           </span>
         </div>
+        <span className="sm:hidden text-[8px] font-bold font-mono text-[#176B37] leading-none mt-0.5">
+          RC 80540
+        </span>
         <span 
-          className="text-[9px] sm:text-[11px] font-semibold leading-tight tracking-normal mt-0.5 sm:mt-1 hidden md:block truncate max-w-[240px] lg:max-w-none"
+          className="text-[10px] lg:text-[11px] font-semibold leading-tight tracking-normal mt-0.5 hidden md:block truncate max-w-[230px] lg:max-w-none"
           style={{ color: subtextColor }}
         >
           Association of Mobile Money Operators of Nigeria

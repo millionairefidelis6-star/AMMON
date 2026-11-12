@@ -75,7 +75,7 @@ export const AmmonLogo: React.FC<AmmonLogoProps> = ({ className = '', variant = 
           </span>
         </div>
         <span 
-          className="text-[10px] sm:text-[11px] font-semibold leading-tight tracking-normal whitespace-nowrap mt-1"
+          className="text-[9px] sm:text-[11px] font-semibold leading-tight tracking-normal mt-0.5 sm:mt-1 hidden md:block truncate max-w-[240px] lg:max-w-none"
           style={{ color: subtextColor }}
         >
           Association of Mobile Money Operators of Nigeria

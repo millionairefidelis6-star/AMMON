@@ -5,6 +5,7 @@ import {
   signInWithPopup, 
   signOut, 
   onAuthStateChanged,
+  sendPasswordResetEmail,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -27,7 +28,7 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export { onAuthStateChanged, type FirebaseUser };
+export { onAuthStateChanged, sendPasswordResetEmail, type FirebaseUser };
 
 // Standard Error Handler per Firebase Integration Skill
 export enum OperationType {
@@ -102,4 +103,8 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
 
 export async function logOutFirebase(): Promise<void> {
   await signOut(auth);
+}
+
+export async function sendPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email);
 }

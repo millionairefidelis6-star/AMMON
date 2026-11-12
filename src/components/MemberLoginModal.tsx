@@ -5,6 +5,7 @@ import {
   User, 
   ShieldCheck, 
   ArrowRight, 
+  ArrowLeft,
   CheckCircle2, 
   AlertCircle, 
   Building,
@@ -12,11 +13,13 @@ import {
   Sparkles,
   ShieldAlert,
   Crown,
-  Briefcase
+  Briefcase,
+  Mail,
+  Loader2
 } from 'lucide-react';
 import { Member, AdminUser } from '../types';
 import { ADMIN_USERS, TEST_ADMIN_CREDENTIALS } from '../data/mockData';
-import { signInWithGoogle } from '../firebase';
+import { signInWithGoogle, sendPasswordReset } from '../firebase';
 import { User as FirebaseUser } from 'firebase/auth';
 
 interface MemberLoginModalProps {
@@ -54,6 +57,86 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [showForgotNotice, setShowForgotNotice] = useState(false);
+
+  // Forgot Password / Recovery States
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
+  const [resetError, setResetError] = useState('');
+
+  const handleOpenForgotPassword = () => {
+    setErrorMsg('');
+    setResetError('');
+    setResetSuccess(false);
+
+    // Smart pre-fill: check identifier or adminEmail
+    if (activeTab === 'admin') {
+      if (adminEmail && adminEmail.includes('@')) {
+        setResetEmail(adminEmail.trim());
+      } else {
+        setResetEmail('superadmin@ammon.ng');
+      }
+    } else {
+      const clean = identifier.trim().toLowerCase();
+      if (clean.includes('@')) {
+        setResetEmail(identifier.trim());
+      } else if (clean) {
+        const found = members.find(
+          (m) =>
+            m.membershipId.toLowerCase() === clean ||
+            m.phone.replace(/\s+/g, '').includes(clean.replace(/\s+/g, '')) ||
+            m.fullName.toLowerCase().includes(clean)
+        );
+        if (found?.email) {
+          setResetEmail(found.email);
+        } else {
+          setResetEmail('');
+        }
+      } else {
+        setResetEmail('');
+      }
+    }
+    setIsForgotPassword(true);
+  };
+
+  const handleSendPasswordResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError('');
+    setResetSuccess(false);
+
+    const emailToSend = resetEmail.trim();
+    if (!emailToSend || !emailToSend.includes('@')) {
+      setResetError('Please enter a valid registered email address.');
+      return;
+    }
+
+    setIsResetting(true);
+    try {
+      await sendPasswordReset(emailToSend);
+      setResetSuccess(true);
+    } catch (err: unknown) {
+      console.error('Password reset failed:', err);
+      let message = 'Unable to send password reset email. Please verify the email address or try again.';
+      if (err && typeof err === 'object' && 'code' in err) {
+        const code = (err as { code: string }).code;
+        if (code === 'auth/user-not-found') {
+          message = 'No registered AMMON account found matching this email address.';
+        } else if (code === 'auth/invalid-email') {
+          message = 'The email address entered is not valid.';
+        } else if (code === 'auth/too-many-requests') {
+          message = 'Too many requests. Please wait a short moment and try again.';
+        } else if (code === 'auth/network-request-failed') {
+          message = 'Network connectivity issue. Please check your internet connection.';
+        }
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
+      setResetError(message);
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -160,7 +243,9 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center text-white shrink-0">
-                {activeTab === 'operator' ? (
+                {isForgotPassword ? (
+                  <KeyRound className="w-5 h-5 text-emerald-200" />
+                ) : activeTab === 'operator' ? (
                   <Lock className="w-5 h-5 text-emerald-200" />
                 ) : (
                   <ShieldAlert className="w-5 h-5 text-emerald-200" />
@@ -168,10 +253,16 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
               </div>
               <div>
                 <h3 className="font-bold text-lg leading-tight">
-                  {activeTab === 'operator' ? 'Member Portal Login' : 'Directorate & Executive Access'}
+                  {isForgotPassword
+                    ? 'Account Password Recovery'
+                    : activeTab === 'operator'
+                    ? 'Member Portal Login'
+                    : 'Directorate & Executive Access'}
                 </h3>
                 <p className="text-xs text-emerald-100">
-                  {activeTab === 'operator'
+                  {isForgotPassword
+                    ? 'Reset your password securely via Firebase Authentication'
+                    : activeTab === 'operator'
                     ? 'Access your operator dashboard, digital ID card & dues receipts'
                     : 'Institutional governance, registry oversight & treasury audit'}
                 </p>
@@ -192,10 +283,12 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
               type="button"
               onClick={() => {
                 setActiveTab('operator');
+                setIsForgotPassword(false);
                 setErrorMsg('');
+                setResetError('');
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                activeTab === 'operator'
+                !isForgotPassword && activeTab === 'operator'
                   ? 'bg-white text-[#176B37] shadow-sm'
                   : 'text-emerald-100 hover:text-white hover:bg-white/5'
               }`}
@@ -207,10 +300,12 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
               type="button"
               onClick={() => {
                 setActiveTab('admin');
+                setIsForgotPassword(false);
                 setErrorMsg('');
+                setResetError('');
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                activeTab === 'admin'
+                !isForgotPassword && activeTab === 'admin'
                   ? 'bg-white text-[#176B37] shadow-sm'
                   : 'text-emerald-100 hover:text-white hover:bg-white/5'
               }`}
@@ -224,81 +319,223 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
         {/* Content */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs">
           
-          {errorMsg && (
+          {errorMsg && !isForgotPassword && (
             <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-red-800 flex items-start gap-2 animate-in fade-in">
               <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <span className="leading-tight">{errorMsg}</span>
             </div>
           )}
 
-          {/* TAB 1: POS OPERATOR LOGIN */}
-          {activeTab === 'operator' && (
-            <>
-              {/* Google One-Click Authentication */}
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                disabled={isLoading}
-                className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 shadow-xs flex items-center justify-center gap-2.5 transition-all cursor-pointer hover:border-gray-400"
-              >
-                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                </svg>
-                <span>Continue with Google Account</span>
-              </button>
-
-              <div className="relative flex items-center my-1">
-                <div className="flex-grow border-t border-gray-200"></div>
-                <span className="flex-shrink mx-2 text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or sign in with membership id</span>
-                <div className="flex-grow border-t border-gray-200"></div>
+          {/* FORGOT PASSWORD RECOVERY VIEW (FIREBASE AUTH) */}
+          {isForgotPassword ? (
+            <div className="space-y-4 animate-in fade-in duration-150">
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsForgotPassword(false);
+                    setResetError('');
+                    setResetSuccess(false);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#176B37] hover:underline cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Sign In</span>
+                </button>
+                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                  Firebase Account Recovery
+                </span>
               </div>
 
-              <form onSubmit={handleOperatorLoginSubmit} className="space-y-4">
-                <div>
-                  <label className="block font-semibold text-gray-700 mb-1">
-                    Membership ID, Registered Phone, or Email *
-                  </label>
-                  <div className="relative">
-                    <User className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      required
-                      value={identifier}
-                      onChange={(e) => setIdentifier(e.target.value)}
-                      placeholder="e.g. AMMON-LAG-2025-08492 or +234..."
-                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
-                    />
-                  </div>
-                </div>
+              <div>
+                <h4 className="text-base font-bold text-[#252525]">
+                  Recover Account Access
+                </h4>
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                  Enter your registered AMMON operator or executive email address below. We will send an official
+                  password reset link directly to your inbox via Firebase Authentication.
+                </p>
+              </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-semibold text-gray-700">
-                      Account PIN or Password *
-                    </label>
+              {resetError && (
+                <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-red-800 flex items-start gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span className="leading-tight">{resetError}</span>
+                </div>
+              )}
+
+              {resetSuccess ? (
+                <div className="p-4 bg-[#EAF3ED] border border-[#176B37]/30 rounded-2xl space-y-3 animate-in fade-in">
+                  <div className="flex items-center gap-2.5 text-[#14532D]">
+                    <div className="w-8 h-8 rounded-full bg-[#176B37] text-white flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-xs text-[#14532D]">Password Reset Email Dispatched!</h5>
+                      <p className="text-[11px] text-gray-600">
+                        Instructions sent to <strong className="text-[#176B37] font-mono">{resetEmail}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-gray-700 leading-relaxed">
+                    Firebase Authentication has dispatched a password reset link to your email. 
+                    Please check your inbox (and spam/junk folder) and click the link to choose a new password, 
+                    then return here to sign in.
+                  </p>
+
+                  <div className="pt-2 flex flex-col sm:flex-row gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowForgotNotice(!showForgotNotice)}
-                      className="text-[11px] text-[#176B37] hover:underline cursor-pointer"
+                      onClick={() => {
+                        setIsForgotPassword(false);
+                        setResetSuccess(false);
+                        setResetError('');
+                      }}
+                      className="flex-1 py-2.5 bg-[#176B37] hover:bg-[#14532D] text-white font-bold rounded-xl text-center transition-colors cursor-pointer text-xs"
                     >
-                      Forgot PIN / ID?
+                      Return to Member Sign In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSendPasswordResetSubmit}
+                      disabled={isResetting}
+                      className="py-2.5 px-4 bg-white border border-[#176B37]/30 text-[#176B37] hover:bg-[#EAF3ED] font-semibold rounded-xl text-center transition-colors cursor-pointer text-xs"
+                    >
+                      {isResetting ? 'Resending...' : 'Resend Email'}
                     </button>
                   </div>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      required
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value)}
-                      placeholder="Enter 4-digit PIN or password"
-                      className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
-                    />
-                  </div>
                 </div>
+              ) : (
+                <form onSubmit={handleSendPasswordResetSubmit} className="space-y-4">
+                  <div>
+                    <label className="block font-semibold text-gray-700 mb-1">
+                      Registered Email Address *
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="email"
+                        required
+                        value={resetEmail}
+                        onChange={(e) => setResetEmail(e.target.value)}
+                        placeholder="e.g. operator@kolawole.ng or superadmin@ammon.ng"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-gray-600 text-[11px] leading-relaxed flex items-start gap-2">
+                    <ShieldCheck className="w-4 h-4 text-[#176B37] shrink-0 mt-0.5" />
+                    <span>
+                      Password reset security is handled and verified by Google Firebase Authentication for the Association of Mobile Money Operators of Nigeria.
+                    </span>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isResetting}
+                    className="w-full py-3 bg-[#176B37] hover:bg-[#14532D] text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isResetting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Sending Reset Email via Firebase...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="w-4 h-4" />
+                        <span>Send Password Reset Email</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsForgotPassword(false);
+                        setResetError('');
+                      }}
+                      className="text-xs text-gray-500 hover:text-gray-800 font-semibold cursor-pointer"
+                    >
+                      Cancel and Return to Sign In
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* TAB 1: POS OPERATOR LOGIN */}
+              {activeTab === 'operator' && (
+                <>
+                  {/* Google One-Click Authentication */}
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={isLoading}
+                    className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 shadow-xs flex items-center justify-center gap-2.5 transition-all cursor-pointer hover:border-gray-400"
+                  >
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                    </svg>
+                    <span>Continue with Google Account</span>
+                  </button>
+
+                  <div className="relative flex items-center my-1">
+                    <div className="flex-grow border-t border-gray-200"></div>
+                    <span className="flex-shrink mx-2 text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or sign in with membership id</span>
+                    <div className="flex-grow border-t border-gray-200"></div>
+                  </div>
+
+                  <form onSubmit={handleOperatorLoginSubmit} className="space-y-4">
+                    <div>
+                      <label className="block font-semibold text-gray-700 mb-1">
+                        Membership ID, Registered Phone, or Email *
+                      </label>
+                      <div className="relative">
+                        <User className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={identifier}
+                          onChange={(e) => setIdentifier(e.target.value)}
+                          placeholder="e.g. AMMON-LAG-2025-08492 or +234..."
+                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-semibold text-gray-700">
+                          Account PIN or Password *
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleOpenForgotPassword}
+                          className="text-[11px] text-[#176B37] font-semibold hover:underline cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <KeyRound className="w-3 h-3 text-[#176B37]" />
+                          <span>Forgot Password?</span>
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <KeyRound className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="password"
+                          required
+                          value={pin}
+                          onChange={(e) => setPin(e.target.value)}
+                          placeholder="Enter 4-digit PIN or password"
+                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
+                        />
+                      </div>
+                    </div>
 
                 {showForgotNotice && (
                   <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-[11px] leading-relaxed">
@@ -513,9 +750,19 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-gray-700 mb-1">
-                    Administrative Password *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-gray-700">
+                      Administrative Password *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleOpenForgotPassword}
+                      className="text-[11px] text-[#176B37] font-semibold hover:underline cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <KeyRound className="w-3 h-3 text-[#176B37]" />
+                      <span>Forgot Password?</span>
+                    </button>
+                  </div>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
@@ -551,6 +798,8 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
               </div>
             </div>
           )}
+        </>
+      )}
 
         </div>
       </div>

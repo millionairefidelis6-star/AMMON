@@ -1,0 +1,16 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // AMMON Member Passports & KYC Verification Documents
+    match /ammon-kyc/{folder}/{sessionId}/{fileName} {
+      allow read: if true;
+      allow write: if folder in ['member-passports', 'kyc-documents']
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

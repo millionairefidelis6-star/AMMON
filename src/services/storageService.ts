@@ -9,7 +9,7 @@ import {
 export interface KycUploadResult {
   url: string;
   storagePath: string;
-  provider: 'firebase-storage' | 'ammon-vault';
+  provider: 'firebase-storage' | 'ammon-vault' | 'cloud-firestore-inline';
 }
 
 function blobToBase64DataUrl(blob: Blob): Promise<string> {
@@ -42,13 +42,46 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-async function uploadToAmmonVaultWithRetry(params: {
+async function tryUploadToFirebaseStorage(params: {
+  blob: Blob;
+  folder: 'member-passports' | 'kyc-documents';
+  sessionId: string;
+  fullPath: string;
+  contentType: string;
+}): Promise<KycUploadResult> {
+  const fileRef = storageRef(storage, params.fullPath);
+  const snapshot = await withTimeout(
+    uploadBytes(fileRef, params.blob, {
+      contentType: params.contentType,
+      customMetadata: {
+        folder: params.folder,
+        sessionId: params.sessionId,
+        app: 'AMMON-Nigeria',
+        authenticated: auth.currentUser ? 'true' : 'false',
+      },
+    }),
+    7000,
+    'Firebase Storage upload'
+  );
+  const downloadUrl = await withTimeout(
+    getDownloadURL(snapshot.ref),
+    5000,
+    'Firebase Storage URL lookup'
+  );
+  return {
+    url: downloadUrl,
+    storagePath: params.fullPath,
+    provider: 'firebase-storage',
+  };
+}
+
+async function tryUploadToAmmonVault(params: {
   folder: 'member-passports' | 'kyc-documents';
   fileName: string;
   dataUrl: string;
 }): Promise<{ url: string; storagePath: string }> {
   let lastError = 'Unable to reach AMMON upload vault.';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const resp = await fetch('/api/uploads/kyc', {
         method: 'POST',
@@ -71,6 +104,7 @@ async function uploadToAmmonVaultWithRetry(params: {
       } else {
         const errPayload = await resp.json().catch(() => ({} as { error?: string }));
         lastError = errPayload?.error || `Upload server returned HTTP ${resp.status}`;
+        // Do not retry client errors (e.g. 404 on static preview, 400 invalid payload)
         if (resp.status >= 400 && resp.status < 500 && resp.status !== 408 && resp.status !== 429) {
           break;
         }
@@ -79,8 +113,8 @@ async function uploadToAmmonVaultWithRetry(params: {
       lastError = err instanceof Error ? err.message : 'Network error during upload.';
     }
 
-    if (attempt < 2) {
-      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    if (attempt < 1) {
+      await new Promise((r) => setTimeout(r, 350));
     }
   }
   throw new Error(lastError);
@@ -88,9 +122,10 @@ async function uploadToAmmonVaultWithRetry(params: {
 
 /**
  * Upload a member's KYC asset (passport photograph or government ID / business license).
- * Prioritizes AMMON's fast same-origin persistent vault (with retries), uses Firebase Storage
- * when authenticated or if vault is unavailable, and safely preserves compact auto-fitted
- * JPEG assets inline so registration is never blocked by transient storage errors.
+ * Uses Firebase Storage (`gs://...firebasestorage.app`) when permitted or authenticated,
+ * AMMON's Express Persistent Vault (`/api/uploads/kyc`) when running full-stack, and
+ * falls back cleanly to compact inline Firestore-ready JPEG persistence if running on
+ * static hosting where `/api/*` returns 404.
  */
 export async function uploadMemberKycAsset(params: {
   blob: Blob;
@@ -107,9 +142,27 @@ export async function uploadMemberKycAsset(params: {
 
   const resolvedDataUrl = params.dataUrl || (await blobToBase64DataUrl(params.blob));
 
-  // 1. Primary (fast & same-origin): AMMON Express Backend Persistent Vault
+  // If user is authenticated with Firebase, try Firebase Storage first
+  if (auth.currentUser) {
+    try {
+      return await tryUploadToFirebaseStorage({
+        blob: params.blob,
+        folder: params.folder,
+        sessionId: safeSession,
+        fullPath,
+        contentType,
+      });
+    } catch (firebaseErr) {
+      console.warn(
+        'Authenticated Firebase Storage upload fallback:',
+        firebaseErr instanceof Error ? firebaseErr.message : firebaseErr
+      );
+    }
+  }
+
+  // Next: AMMON Express Backend Persistent Vault
   try {
-    const vaultRes = await uploadToAmmonVaultWithRetry({
+    const vaultRes = await tryUploadToAmmonVault({
       folder: params.folder,
       fileName: safeFile,
       dataUrl: resolvedDataUrl,
@@ -126,46 +179,30 @@ export async function uploadMemberKycAsset(params: {
     );
   }
 
-  // 2. Secondary: Firebase Storage SDK (especially when authenticated or static-hosted)
-  try {
-    const fileRef = storageRef(storage, fullPath);
-    const snapshot = await withTimeout(
-      uploadBytes(fileRef, params.blob, {
+  // Next: Firebase Storage SDK (works whenever Storage rules permit public KYC uploads)
+  if (!auth.currentUser) {
+    try {
+      return await tryUploadToFirebaseStorage({
+        blob: params.blob,
+        folder: params.folder,
+        sessionId: safeSession,
+        fullPath,
         contentType,
-        customMetadata: {
-          folder: params.folder,
-          sessionId: safeSession,
-          app: 'AMMON-Nigeria',
-          authenticated: auth.currentUser ? 'true' : 'false',
-        },
-      }),
-      6000,
-      'Firebase Storage upload'
-    );
-    const downloadUrl = await withTimeout(
-      getDownloadURL(snapshot.ref),
-      5000,
-      'Firebase Storage URL lookup'
-    );
-    return {
-      url: downloadUrl,
-      storagePath: fullPath,
-      provider: 'firebase-storage',
-    };
-  } catch (firebaseErr) {
-    console.warn(
-      'Firebase Storage fallback note:',
-      firebaseErr instanceof Error ? firebaseErr.message : firebaseErr
-    );
+      });
+    } catch (firebaseErr) {
+      console.warn(
+        'Public Firebase Storage upload note:',
+        firebaseErr instanceof Error ? firebaseErr.message : firebaseErr
+      );
+    }
   }
 
-  // 3. Final Resilient Fallback: Store compact auto-fitted JPEG data URL directly in persistent DB
-  // Auto-fitted 500x600 passport images are ~40-120 KB, well inside Firestore (1 MB) & Express store limits.
+  // Final Resilient Fallback: Compact auto-fitted JPEG persisted directly in Cloud Firestore document
   if (resolvedDataUrl.length <= 650_000) {
     return {
       url: resolvedDataUrl,
       storagePath: fullPath,
-      provider: 'ammon-vault',
+      provider: 'cloud-firestore-inline',
     };
   }
 

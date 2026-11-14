@@ -33,7 +33,11 @@ const app = initializeApp(firebaseConfig);
 // CRITICAL: Must pass firestoreDatabaseId
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
-export const storage = getStorage(app);
+export const STORAGE_BUCKET = firebaseConfig.storageBucket || '';
+export const storage = getStorage(
+  app,
+  STORAGE_BUCKET ? `gs://${STORAGE_BUCKET}` : undefined
+);
 export const googleProvider = new GoogleAuthProvider();
 export {
   onAuthStateChanged,

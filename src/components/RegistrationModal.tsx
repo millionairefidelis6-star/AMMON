@@ -125,6 +125,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
       const uploaded = await uploadMemberKycAsset({
         blob: processed.blob,
+        dataUrl: processed.dataUrl,
         folder: 'member-passports',
         sessionId,
         fileName: 'passport.jpg',
@@ -171,6 +172,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
       const uploaded = await uploadMemberKycAsset({
         blob: processed.blob,
+        dataUrl: processed.dataUrl,
         folder: 'kyc-documents',
         sessionId,
         fileName: slug,
@@ -254,6 +256,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       if (!finalPassportUrl) {
         const uploaded = await uploadMemberKycAsset({
           blob: passportAsset.blob,
+          dataUrl: passportAsset.previewDataUrl,
           folder: 'member-passports',
           sessionId,
           fileName: 'passport.jpg',
@@ -269,6 +272,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
         const slug = kycDocType === 'Government ID' ? 'gov_id.jpg' : 'business_license.jpg';
         const uploaded = await uploadMemberKycAsset({
           blob: kycDocAsset.blob,
+          dataUrl: kycDocAsset.previewDataUrl,
           folder: 'kyc-documents',
           sessionId,
           fileName: slug,

@@ -134,7 +134,7 @@ function denyAndLogJurisdictionViolation(
 
 async function createAppServer() {
   const app = express();
-  app.use(express.json({ limit: '4mb' }));
+  app.use(express.json({ limit: '10mb' }));
 
   // Health Check
   app.get('/api/health', (_req, res) => {
@@ -1274,39 +1274,44 @@ async function createAppServer() {
   const uploadsRoot = path.resolve(process.cwd(), '.ammon-data', 'uploads');
 
   app.post('/api/uploads/kyc', (req, res) => {
-    const { folder, fileName, dataUrl } = req.body || {};
-    const allowedFolders = ['member-passports', 'kyc-documents'];
-    const cleanFolder = allowedFolders.includes(folder) ? folder : 'kyc-documents';
-    if (typeof dataUrl !== 'string' || !/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(dataUrl)) {
-      res.status(400).json({ error: 'Valid JPEG, PNG, or WebP image payload is required.' });
-      return;
+    try {
+      const { folder, fileName, dataUrl } = req.body || {};
+      const allowedFolders = ['member-passports', 'kyc-documents'];
+      const cleanFolder = allowedFolders.includes(folder) ? folder : 'kyc-documents';
+      if (typeof dataUrl !== 'string' || !/^data:[^;]*;base64,/i.test(dataUrl)) {
+        res.status(400).json({ error: 'Valid base64 JPEG, PNG, or WebP image payload is required.' });
+        return;
+      }
+
+      const commaIdx = dataUrl.indexOf(',');
+      const mimeMatch = dataUrl.slice(0, commaIdx).match(/^data:([^;]+);base64$/i);
+      const mimeType = mimeMatch ? mimeMatch[1].toLowerCase() : 'image/jpeg';
+      const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+      const base64Data = dataUrl.slice(commaIdx + 1).replace(/\s+/g, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      if (!buffer.length || buffer.length > 6 * 1024 * 1024) {
+        res.status(400).json({ error: 'Uploaded image exceeds 6 MB limit or is empty.' });
+        return;
+      }
+
+      const baseSafe = String(fileName || 'kyc')
+        .replace(/\.[a-zA-Z0-9]+$/, '')
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 48);
+      const storedName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${baseSafe}.${ext}`;
+      const targetDir = path.join(uploadsRoot, cleanFolder);
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(path.join(targetDir, storedName), buffer);
+
+      res.status(201).json({
+        url: `/api/uploads/${cleanFolder}/${storedName}`,
+        storagePath: `ammon-kyc/${cleanFolder}/${storedName}`,
+      });
+    } catch (err) {
+      console.error('KYC upload write error:', err);
+      res.status(500).json({ error: 'Server failed to persist uploaded KYC image.' });
     }
-
-    const commaIdx = dataUrl.indexOf(',');
-    const mimeMatch = dataUrl.slice(0, commaIdx).match(/^data:(image\/[a-zA-Z0-9+.-]+);base64$/i);
-    const mimeType = mimeMatch ? mimeMatch[1].toLowerCase() : 'image/jpeg';
-    const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
-    const base64Data = dataUrl.slice(commaIdx + 1);
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    if (!buffer.length || buffer.length > 3.5 * 1024 * 1024) {
-      res.status(400).json({ error: 'Uploaded image exceeds 3.5 MB limit or is empty.' });
-      return;
-    }
-
-    const baseSafe = String(fileName || 'kyc')
-      .replace(/\.[a-zA-Z0-9]+$/, '')
-      .replace(/[^a-zA-Z0-9_-]/g, '_')
-      .slice(0, 48);
-    const storedName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${baseSafe}.${ext}`;
-    const targetDir = path.join(uploadsRoot, cleanFolder);
-    fs.mkdirSync(targetDir, { recursive: true });
-    fs.writeFileSync(path.join(targetDir, storedName), buffer);
-
-    res.status(201).json({
-      url: `/api/uploads/${cleanFolder}/${storedName}`,
-      storagePath: `ammon-kyc/${cleanFolder}/${storedName}`,
-    });
   });
 
   app.get('/api/uploads/:folder/:filename', (req, res) => {
@@ -1322,6 +1327,16 @@ async function createAppServer() {
       return;
     }
     res.sendFile(filePath);
+  });
+
+  // Ensure /api/* middleware errors (e.g., PayloadTooLargeError, malformed JSON) always return JSON
+  app.use('/api', (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const status =
+      err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
+        ? (err as { status: number }).status
+        : 500;
+    const message = err instanceof Error ? err.message : 'Unexpected API request error.';
+    res.status(status).json({ error: message });
   });
 
   // =========================================================================

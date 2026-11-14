@@ -136,10 +136,17 @@ service cloud.firestore {
       allow create: if isValidId(memberId)
         && incoming().membershipId is string
         && incoming().fullName is string
+        && incoming().email is string
+        && incoming().email.size() > 3
         && incoming().state is string;
       allow update: if isValidId(memberId) && (
         isSuperAdmin() ||
-        (isActiveExecutive() && hasJurisdictionAccess(existing()) && !incoming().diff(existing()).affectedKeys().hasAny(['paystackVerified', 'paystackReference']))
+        (isActiveExecutive() && hasJurisdictionAccess(existing()) && !incoming().diff(existing()).affectedKeys().hasAny(['paystackVerified', 'paystackReference'])) ||
+        (
+          existing().emailVerified != true &&
+          incoming().emailVerified == true &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['emailVerified', 'emailVerifiedAt', 'otpHash', 'otpExpiresAt'])
+        )
       );
       allow delete: if isSuperAdmin();
     }

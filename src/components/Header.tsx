@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { AmmonLogo } from './AmmonLogo';
 import { Member, AdminUser } from '../types';
-import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderProps {
   onOpenRegister: () => void;
@@ -39,10 +38,8 @@ interface HeaderProps {
   onOpenMeetings?: () => void;
   loggedInMember: Member | null;
   adminUser?: AdminUser | null;
-  firebaseUser?: FirebaseUser | null;
   onLogout: () => void;
   onLogoutAdmin?: () => void;
-  onLogoutGoogle?: () => void;
   onSelectAdmin?: (admin: AdminUser) => void;
   activeNav: string;
   setActiveNav: (nav: string) => void;
@@ -60,10 +57,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenMeetings,
   loggedInMember,
   adminUser,
-  firebaseUser,
   onLogout,
   onLogoutAdmin,
-  onLogoutGoogle,
   onSelectAdmin,
   activeNav,
   setActiveNav
@@ -73,7 +68,6 @@ export const Header: React.FC<HeaderProps> = ({
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [memberMenuOpen, setMemberMenuOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
-  const [googleMenuOpen, setGoogleMenuOpen] = useState(false);
 
   const notifications = [
     { id: 1, title: 'CBN Circular 2025/11 Released: Mandate on POS Terminal Display', time: '2 hours ago', unread: true },
@@ -89,7 +83,6 @@ export const Header: React.FC<HeaderProps> = ({
         setNotificationOpen(false);
         setAdminMenuOpen(false);
         setMemberMenuOpen(false);
-        setGoogleMenuOpen(false);
       }
     };
     document.addEventListener('click', handleGlobalClick);
@@ -267,7 +260,6 @@ export const Header: React.FC<HeaderProps> = ({
                   setNotificationOpen(!notificationOpen);
                   setAdminMenuOpen(false);
                   setMemberMenuOpen(false);
-                  setGoogleMenuOpen(false);
                 }}
                 className={`relative w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-colors border cursor-pointer shadow-2xs ${
                   notificationOpen
@@ -325,7 +317,6 @@ export const Header: React.FC<HeaderProps> = ({
                     setAdminMenuOpen(!adminMenuOpen);
                     setNotificationOpen(false);
                     setMemberMenuOpen(false);
-                    setGoogleMenuOpen(false);
                   }}
                   className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-bold cursor-pointer transition-all border shadow-2xs ${
                     adminUser.role === 'Super Admin'
@@ -413,7 +404,6 @@ export const Header: React.FC<HeaderProps> = ({
                     setMemberMenuOpen(!memberMenuOpen);
                     setNotificationOpen(false);
                     setAdminMenuOpen(false);
-                    setGoogleMenuOpen(false);
                   }}
                   className="flex items-center gap-1.5 bg-[#EAF3ED] hover:bg-emerald-100/70 border border-emerald-300 text-[#176B37] text-xs px-2.5 py-1.5 rounded-full cursor-pointer transition-colors shadow-2xs"
                 >
@@ -452,78 +442,6 @@ export const Header: React.FC<HeaderProps> = ({
                     >
                       Sign Out / Switch Operator
                     </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Google Verified Account Indicator (if signed in) */}
-            {firebaseUser && (
-              <div className="relative shrink-0 hidden md:block">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setGoogleMenuOpen(!googleMenuOpen);
-                    setNotificationOpen(false);
-                    setAdminMenuOpen(false);
-                    setMemberMenuOpen(false);
-                  }}
-                  className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100/70 border border-blue-200 text-blue-900 text-xs px-2 py-1 rounded-full cursor-pointer transition-colors shadow-2xs"
-                  title={`Google Account: ${firebaseUser.email}`}
-                >
-                  {firebaseUser.photoURL ? (
-                    <img
-                      src={firebaseUser.photoURL}
-                      alt={firebaseUser.displayName || 'Google'}
-                      className="w-4 h-4 rounded-full object-cover shrink-0"
-                    />
-                  ) : (
-                    <div className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-[9px] shrink-0">
-                      G
-                    </div>
-                  )}
-                  <span className="font-semibold truncate max-w-[70px]">
-                    {firebaseUser.displayName?.split(' ')[0] || firebaseUser.email?.split('@')[0]}
-                  </span>
-                </button>
-
-                {googleMenuOpen && (
-                  <div 
-                    onClick={(e) => e.stopPropagation()}
-                    className="absolute right-0 mt-2 w-64 bg-white text-[#252525] rounded-xl shadow-2xl border border-[#E5E7EB] py-2 z-50 animate-in fade-in zoom-in-95 duration-150"
-                  >
-                    <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-2.5">
-                      {firebaseUser.photoURL ? (
-                        <img
-                          src={firebaseUser.photoURL}
-                          alt="Profile"
-                          className="w-8 h-8 rounded-full object-cover shrink-0"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0">
-                          G
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        <p className="font-bold text-xs truncate">{firebaseUser.displayName || 'Google Operator'}</p>
-                        <p className="text-[10px] text-gray-500 truncate">{firebaseUser.email}</p>
-                        <span className="text-[9px] bg-emerald-50 text-[#176B37] font-semibold px-1.5 py-0.2 rounded border border-emerald-200">
-                          Google Verified
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="pt-1">
-                      <button
-                        onClick={() => {
-                          setGoogleMenuOpen(false);
-                          if (onLogoutGoogle) onLogoutGoogle();
-                        }}
-                        className="w-full text-left px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 cursor-pointer"
-                      >
-                        Sign Out of Google
-                      </button>
-                    </div>
                   </div>
                 )}
               </div>

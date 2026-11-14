@@ -58,6 +58,12 @@ export interface Member {
   paystackVerified?: boolean;
   registeredByExecutiveId?: string;
   lastUpdatedBy?: string;
+  emailVerified?: boolean;
+  emailVerifiedAt?: string;
+  passwordHash?: string;
+  passwordSalt?: string;
+  otpHash?: string;
+  otpExpiresAt?: number;
 }
 
 export interface NewsArticle {

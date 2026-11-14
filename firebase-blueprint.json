@@ -36,9 +36,15 @@
         "paymentStatus": { "type": "string", "enum": ["Paid", "Unpaid", "Partially Paid", "Payment Pending", "Expired", "Payment Verification Required"] },
         "paystackReference": { "type": "string", "maxLength": 128 },
         "paystackVerified": { "type": "boolean" },
+        "emailVerified": { "type": "boolean" },
+        "emailVerifiedAt": { "type": "string", "maxLength": 64 },
+        "passwordHash": { "type": "string", "maxLength": 256 },
+        "passwordSalt": { "type": "string", "maxLength": 128 },
+        "otpHash": { "type": "string", "maxLength": 256 },
+        "otpExpiresAt": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["membershipId", "fullName", "businessName", "phone", "state", "status"]
+      "required": ["membershipId", "fullName", "businessName", "email", "phone", "state", "status"]
     },
     "executive_account": {
       "title": "AMMON Hierarchical Executive Account",

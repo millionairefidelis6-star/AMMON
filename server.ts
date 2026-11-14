@@ -54,6 +54,46 @@ function signExecutiveToken(exec: StoredExecutive): string {
   return `${encoded}.${sig}`;
 }
 
+function sanitizeMember(m: Member): Member {
+  const {
+    passwordHash: _ph,
+    passwordSalt: _ps,
+    otpHash: _oh,
+    otpExpiresAt: _oe,
+    ...safe
+  } = m;
+  return safe;
+}
+
+function isStrongPassword(password: string): boolean {
+  return (
+    password.length >= 8 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /[0-9]/.test(password) &&
+    /[^A-Za-z0-9]/.test(password)
+  );
+}
+
+function verifySecretString(plain: string, storedHash?: string, storedSalt?: string): boolean {
+  if (!plain || !storedHash) return false;
+  if (storedHash.startsWith('scrypt:')) {
+    const [, salt, hash] = storedHash.split(':');
+    if (!salt || !hash) return false;
+    return verifyPassword(plain, hash, salt);
+  }
+  if (storedHash.startsWith('sha256:') && storedSalt) {
+    const digest = crypto.createHash('sha256').update(`${storedSalt}::${plain}`).digest('hex');
+    const expected = `sha256:${digest}`;
+    if (expected.length !== storedHash.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(storedHash));
+  }
+  if (storedSalt) {
+    return verifyPassword(plain, storedHash, storedSalt);
+  }
+  return false;
+}
+
 function verifyExecutiveToken(token: string): SessionPayload | null {
   try {
     const parts = token.split('.');
@@ -368,17 +408,211 @@ async function createAppServer() {
     }
   });
 
+  // =========================================================================
+  // 1B. MEMBER PASSWORD AUTHENTICATION & EMAIL OTP VERIFICATION
+  // =========================================================================
+  app.post('/api/auth/member-login', (req, res) => {
+    const { identifier, password } = req.body || {};
+    const cleanId = String(identifier || '').trim().toLowerCase();
+    const cleanPwd = String(password || '');
+
+    if (!cleanId || !cleanPwd) {
+      res.status(400).json({ error: 'Membership ID/Email and password are required.' });
+      return;
+    }
+
+    const cleanDigits = cleanId.replace(/\s+/g, '');
+    const member = ammonStore.getData().members.find(
+      (m) =>
+        m.membershipId.toLowerCase() === cleanId ||
+        m.email.toLowerCase() === cleanId ||
+        (cleanDigits.length >= 7 && m.phone.replace(/\s+/g, '').includes(cleanDigits))
+    );
+
+    if (!member) {
+      res.status(401).json({
+        error: 'No registered operator account found matching that Membership ID, Email, or Phone.',
+      });
+      return;
+    }
+
+    const passwordValid = verifySecretString(cleanPwd, member.passwordHash, member.passwordSalt);
+    if (!passwordValid) {
+      res.status(401).json({
+        error: 'Incorrect password. Please enter the exact password created during registration.',
+      });
+      return;
+    }
+
+    if (member.emailVerified !== true) {
+      res.status(200).json({
+        status: 'OTP_VERIFICATION_REQUIRED',
+        email: member.email,
+        member: sanitizeMember(member),
+      });
+      return;
+    }
+
+    res.json({
+      status: 'AUTHENTICATED',
+      member: sanitizeMember(member),
+    });
+  });
+
+  app.post('/api/auth/send-email-otp', async (req, res) => {
+    const { memberId, email } = req.body || {};
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const member = ammonStore
+      .getData()
+      .members.find(
+        (m) =>
+          (memberId && (m.id === memberId || m.membershipId === memberId)) ||
+          (cleanEmail && m.email.toLowerCase() === cleanEmail)
+      );
+
+    if (!member) {
+      res.status(404).json({ error: 'Member account not found for email verification.' });
+      return;
+    }
+
+    const targetEmail = member.email || cleanEmail;
+    if (!targetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
+      res.status(400).json({ error: 'A valid registered email address is required for OTP verification.' });
+      return;
+    }
+
+    const otpCode = String(crypto.randomInt(100000, 1000000));
+    const { hash, salt } = hashPassword(otpCode);
+    member.otpHash = `scrypt:${salt}:${hash}`;
+    member.otpExpiresAt = Date.now() + 10 * 60 * 1000;
+    ammonStore.save();
+
+    const resendKey = process.env.RESEND_API_KEY;
+    const emailFrom = process.env.EMAIL_FROM || 'AMMON Nigeria <onboarding@resend.dev>';
+
+    if (resendKey) {
+      try {
+        const emailResp = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${resendKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: emailFrom,
+            to: [targetEmail],
+            subject: 'AMMON Email Verification OTP Code',
+            html: `<div style="font-family:sans-serif;max-width:520px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:16px">
+              <h2 style="color:#176B37;margin:0 0 12px">AMMON Registration Verification</h2>
+              <p>Hello <strong>${member.fullName}</strong>,</p>
+              <p>Use the 6-digit verification code below to confirm your email and unlock your AMMON Member Dashboard:</p>
+              <div style="font-size:28px;font-weight:800;letter-spacing:6px;background:#EAF3ED;color:#14532D;padding:14px 20px;border-radius:12px;text-align:center;margin:16px 0">${otpCode}</div>
+              <p style="font-size:12px;color:#6b7280">This code expires in 10 minutes. Membership ID: ${member.membershipId}</p>
+            </div>`,
+          }),
+        });
+
+        if (emailResp.ok) {
+          res.json({
+            sent: true,
+            deliveryMode: 'email',
+            email: targetEmail,
+            expiresInSeconds: 600,
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('Resend email dispatch fallback:', err);
+      }
+    }
+
+    res.json({
+      sent: true,
+      deliveryMode: 'in-app-relay',
+      email: targetEmail,
+      expiresInSeconds: 600,
+      previewOtp: otpCode,
+    });
+  });
+
+  app.post('/api/auth/verify-email-otp', (req, res) => {
+    const { memberId, email, otp } = req.body || {};
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanOtp = String(otp || '').trim();
+
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      res.status(400).json({ error: 'Please enter the valid 6-digit OTP verification code.' });
+      return;
+    }
+
+    const member = ammonStore
+      .getData()
+      .members.find(
+        (m) =>
+          (memberId && (m.id === memberId || m.membershipId === memberId)) ||
+          (cleanEmail && m.email.toLowerCase() === cleanEmail)
+      );
+
+    if (!member) {
+      res.status(404).json({ error: 'Member record not found.' });
+      return;
+    }
+
+    if (!member.otpHash || !member.otpExpiresAt) {
+      res.status(400).json({ error: 'No active OTP code found. Please click Resend Code to generate a fresh OTP.' });
+      return;
+    }
+
+    if (Date.now() > member.otpExpiresAt) {
+      res.status(400).json({ error: 'This OTP code has expired. Please request a new verification code.' });
+      return;
+    }
+
+    if (!verifySecretString(cleanOtp, member.otpHash)) {
+      res.status(401).json({ error: 'Invalid OTP code. Please check the 6-digit code and try again.' });
+      return;
+    }
+
+    member.emailVerified = true;
+    member.emailVerifiedAt = nowWatLabel();
+    member.otpHash = undefined;
+    member.otpExpiresAt = undefined;
+    ammonStore.save();
+
+    ammonStore.appendAuditLog({
+      actorId: member.id,
+      actorName: member.fullName,
+      actorRole: 'Member',
+      actorLevel: 'member',
+      actorJurisdiction: `${member.lga}, ${member.state} State`,
+      action: 'MEMBER_APPROVAL',
+      affectedRecordId: member.id,
+      affectedRecordLabel: `${member.fullName} (${member.membershipId})`,
+      details: `Confirmed email address (${member.email}) via 6-digit OTP verification.`,
+      zone: member.zone,
+      state: member.state,
+      lga: member.lga,
+    });
+
+    res.json({
+      verified: true,
+      member: sanitizeMember(member),
+    });
+  });
+
   // Public hierarchy & member verification endpoints
   app.get('/api/hierarchy/public', (_req, res) => {
     res.json({ hierarchyConfig: ammonStore.getData().hierarchyConfig });
   });
 
   app.get('/api/members/public', (_req, res) => {
-    const members = ammonStore.getData().members.map((m) => ({
-      ...m,
-      zone: m.zone || ammonStore.resolveZoneForState(m.state),
-      paymentStatus: ammonStore.normalizePaymentStatus(m),
-    }));
+    const members = ammonStore.getData().members.map((m) =>
+      sanitizeMember({
+        ...m,
+        zone: m.zone || ammonStore.resolveZoneForState(m.state),
+        paymentStatus: ammonStore.normalizePaymentStatus(m),
+      })
+    );
     res.json({ members });
   });
 
@@ -454,11 +688,13 @@ async function createAppServer() {
 
     // 1. Scoped Members
     let scopedMembers = db.members
-      .map((m) => ({
-        ...m,
-        zone: m.zone || ammonStore.resolveZoneForState(m.state),
-        paymentStatus: ammonStore.normalizePaymentStatus(m),
-      }))
+      .map((m) =>
+        sanitizeMember({
+          ...m,
+          zone: m.zone || ammonStore.resolveZoneForState(m.state),
+          paymentStatus: ammonStore.normalizePaymentStatus(m),
+        })
+      )
       .filter((m) => ammonStore.isGeoInJurisdiction(exec, m));
 
     if (reqZone) scopedMembers = scopedMembers.filter((m) => m.zone === reqZone);
@@ -596,6 +832,37 @@ async function createAppServer() {
 
     const category = body.category || 'POS Agents';
     const isFreeEnrollment = Boolean(body.freeEnrollment);
+    const cleanEmail = String(body.email || '').trim().toLowerCase();
+
+    if (!exec) {
+      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        res.status(400).json({ error: 'A valid email address is required for OTP verification.' });
+        return;
+      }
+      const existingByEmail = ammonStore
+        .getData()
+        .members.find((m) => m.email.toLowerCase() === cleanEmail);
+      if (existingByEmail) {
+        res.status(409).json({
+          error: 'An AMMON account with this email address already exists. Please sign in instead.',
+        });
+        return;
+      }
+      if (!body.password || !isStrongPassword(String(body.password))) {
+        res.status(400).json({
+          error:
+            'Password must be at least 8 characters and include uppercase, lowercase, number, and special character.',
+        });
+        return;
+      }
+    }
+
+    const passwordCreds = body.password
+      ? hashPassword(String(body.password))
+      : body.passwordHash && body.passwordSalt
+      ? { hash: String(body.passwordHash), salt: String(body.passwordSalt) }
+      : undefined;
+
     const duesAmount = isFreeEnrollment
       ? 0
       : Number(body.duesAmount) ||
@@ -615,7 +882,7 @@ async function createAppServer() {
       membershipId: body.membershipId || `AMMON-${stateCode}-${new Date().getFullYear()}-${crypto.randomInt(10000, 99999)}`,
       fullName: String(body.fullName || 'New AMMON Operator').trim(),
       businessName: String(body.businessName || 'AMMON Accredited Kiosk').trim(),
-      email: String(body.email || '').trim(),
+      email: cleanEmail || String(body.email || '').trim(),
       phone: String(body.phone || '+234 800 000 0000').trim(),
       zone,
       state,
@@ -630,7 +897,7 @@ async function createAppServer() {
       cbnCompliant: Boolean(body.cbnCompliant ?? true),
       status: isFreeEnrollment || (exec && exec.permissions?.canApproveMembers) ? 'Active' : 'Pending Verification',
       joinedDate: new Date().toISOString().slice(0, 10),
-      expiryDate: '2026-12-31',
+      expiryDate: `${new Date().getFullYear() + 1}-12-31`,
       photoUrl: body.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
       passportStoragePath: body.passportStoragePath ? String(body.passportStoragePath) : undefined,
       kycDocumentType:
@@ -645,6 +912,9 @@ async function createAppServer() {
       paymentStatus: requestedPayStatus,
       paystackVerified: false,
       registeredByExecutiveId: exec?.id,
+      emailVerified: exec ? Boolean(body.emailVerified ?? true) : false,
+      passwordHash: passwordCreds?.hash,
+      passwordSalt: passwordCreds?.salt,
     };
 
     ammonStore.getData().members.unshift(newMember);
@@ -660,14 +930,14 @@ async function createAppServer() {
       affectedRecordId: newMember.id,
       affectedRecordLabel: `${newMember.fullName} (${newMember.membershipId})`,
       details: isFreeEnrollment
-        ? `Registered new ${newMember.category} member in ${lga}, ${state} State (${zone}) under open zero-fee registration.`
+        ? `Registered new ${newMember.category} member in ${lga}, ${state} State (${zone}) under open zero-fee registration (pending email OTP verification).`
         : `Registered new ${newMember.category} member in ${lga}, ${state} State (${zone}). Initial payment status: ${newMember.paymentStatus}.`,
       zone,
       state,
       lga,
     });
 
-    res.status(201).json({ member: newMember });
+    res.status(201).json({ member: sanitizeMember(newMember) });
   });
 
   // Backend Paystack Transaction Verification

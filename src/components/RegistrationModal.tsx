@@ -12,6 +12,9 @@ import {
   RefreshCw,
   AlertCircle,
   Loader2,
+  Lock,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Member, MembershipCategory } from '../types';
 import { NIGERIAN_STATES } from '../data/mockData';
@@ -22,6 +25,10 @@ import {
   processPassportPhoto,
 } from '../utils/imageProcessor';
 import { uploadMemberKycAsset } from '../services/storageService';
+import {
+  hashMemberPasswordClient,
+  validateStrongPassword,
+} from '../utils/passwordAuth';
 import { KycCameraCapture } from './KycCameraCapture';
 
 interface RegistrationModalProps {
@@ -66,6 +73,10 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   const [terminalSerial, setTerminalSerial] = useState('');
   const [bvn, setBvn] = useState('');
   const [cacNumber, setCacNumber] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreedTerms, setAgreedTerms] = useState(true);
 
   // Compulsory Passport Photo & KYC Camera Document states
@@ -99,6 +110,10 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     setTerminalSerial('');
     setBvn('');
     setCacNumber('');
+    setPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
     setAgreedTerms(true);
     setPassportAsset(null);
     setKycDocAsset(null);
@@ -202,6 +217,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     }
   };
 
+  const passwordStrength = validateStrongPassword(password);
+
   const handleContinueStep = () => {
     setStepError('');
     if (step === 1) {
@@ -215,6 +232,19 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       }
       if (!phone.trim()) {
         setStepError('Please enter an active WhatsApp Phone Number.');
+        return;
+      }
+      const cleanEmail = email.trim();
+      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        setStepError('Please enter a valid Email Address (required for OTP verification).');
+        return;
+      }
+      if (!passwordStrength.valid) {
+        setStepError(passwordStrength.message);
+        return;
+      }
+      if (password !== confirmPassword) {
+        setStepError('Password and Confirm Password do not match.');
         return;
       }
       if (!lga.trim()) {
@@ -288,11 +318,12 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
         terminalSerial.trim() || `POS-${stateCode}-${Math.floor(10000 + Math.random() * 90000)}`;
       const now = new Date();
       const currentYear = now.getFullYear();
+      const clientCreds = await hashMemberPasswordClient(password);
 
-      const memberPayload: Partial<Member> & { freeEnrollment: boolean } = {
+      const memberPayload: Partial<Member> & { freeEnrollment: boolean; password?: string } = {
         fullName: fullName.trim(),
         businessName: businessName.trim(),
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         phone: phone.trim(),
         zone,
         state,
@@ -314,15 +345,30 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
         duesPaid: true,
         paymentStatus: 'Paid',
         freeEnrollment: true,
+        password,
+        passwordHash: clientCreds.hash,
+        passwordSalt: clientCreds.salt,
+        emailVerified: false,
       };
 
       let registeredMember: Member;
       try {
         const created = await registerMemberApi(memberPayload);
-        registeredMember = created.member;
-      } catch (apiErr) {
-        // When running on static preview (where Express /api/* returns 404) or transient API outage,
-        // create the complete Member record directly so Cloud Firestore + local registry persist it immediately.
+        registeredMember = {
+          ...created.member,
+          passwordHash: clientCreds.hash,
+          passwordSalt: clientCreds.salt,
+          emailVerified: Boolean(created.member.emailVerified),
+        };
+      } catch (apiErr: unknown) {
+        const errStatus =
+          apiErr && typeof apiErr === 'object' && 'status' in apiErr
+            ? Number((apiErr as { status: unknown }).status)
+            : 0;
+        if (errStatus >= 400 && errStatus < 500 && errStatus !== 404 && errStatus !== 408) {
+          throw apiErr;
+        }
+        // Static preview fallback when Express /api/* returns 404 or network unavailable
         const randDigits = Math.floor(10000 + Math.random() * 90000);
         const randSuffix = Math.floor(100 + Math.random() * 900);
         console.warn(
@@ -334,7 +380,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
           membershipId: `AMMON-${stateCode}-${currentYear}-${randDigits}`,
           fullName: memberPayload.fullName!,
           businessName: memberPayload.businessName!,
-          email: memberPayload.email || '',
+          email: memberPayload.email!,
           phone: memberPayload.phone!,
           zone,
           state,
@@ -360,6 +406,9 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
           amountPaid: 0,
           paymentStatus: 'Paid',
           paystackVerified: false,
+          emailVerified: false,
+          passwordHash: clientCreds.hash,
+          passwordSalt: clientCreds.salt,
         };
       }
 
@@ -469,15 +518,107 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
                 <div>
                   <label className="block font-semibold text-gray-700 mb-1">
-                    Email Address
+                    Email Address (For OTP Verification) *
                   </label>
                   <input
                     type="email"
+                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="agent@example.ng"
                     className="w-full p-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37]"
                   />
+                </div>
+              </div>
+
+              {/* Password Creation & Confirmation */}
+              <div className="p-3.5 rounded-2xl bg-[#EAF3ED]/50 border border-[#176B37]/25 space-y-3">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-[#14532D]">
+                  <Lock className="w-3.5 h-3.5 text-[#176B37]" />
+                  <span>Account Security Password *</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-gray-700 mb-1">
+                      Create Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Create strong password"
+                        className="w-full pl-3 pr-9 py-2.5 rounded-xl border border-[#E5E7EB] bg-white focus:outline-hidden focus:border-[#176B37]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-gray-700 mb-1">
+                      Confirm Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter password"
+                        className={`w-full pl-3 pr-9 py-2.5 rounded-xl border bg-white focus:outline-hidden ${
+                          confirmPassword && confirmPassword !== password
+                            ? 'border-red-400 focus:border-red-500'
+                            : 'border-[#E5E7EB] focus:border-[#176B37]'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((v) => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
+                        aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Strict Password Checklist */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
+                  {[
+                    { ok: passwordStrength.checks.length, label: '8+ characters' },
+                    { ok: passwordStrength.checks.upper, label: 'Uppercase (A–Z)' },
+                    { ok: passwordStrength.checks.lower, label: 'Lowercase (a–z)' },
+                    { ok: passwordStrength.checks.number, label: 'Number (0–9)' },
+                    { ok: passwordStrength.checks.special, label: 'Special (@#$!)' },
+                    {
+                      ok: Boolean(password && confirmPassword && password === confirmPassword),
+                      label: 'Passwords match',
+                    },
+                  ].map((rule) => (
+                    <div
+                      key={rule.label}
+                      className={`flex items-center gap-1 font-medium ${
+                        rule.ok ? 'text-[#176B37]' : 'text-gray-500'
+                      }`}
+                    >
+                      <CheckCircle2
+                        className={`w-3 h-3 shrink-0 ${
+                          rule.ok ? 'text-[#176B37]' : 'text-gray-300'
+                        }`}
+                      />
+                      <span>{rule.label}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 

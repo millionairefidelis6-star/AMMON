@@ -1,8 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
-  GoogleAuthProvider, 
-  signInWithPopup, 
   signOut, 
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -38,7 +36,6 @@ export const storage = getStorage(
   app,
   STORAGE_BUCKET ? `gs://${STORAGE_BUCKET}` : undefined
 );
-export const googleProvider = new GoogleAuthProvider();
 export {
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -107,17 +104,6 @@ export async function testFirestoreConnection() {
   }
 }
 testFirestoreConnection();
-
-// Google Auth helper
-export async function signInWithGoogle(): Promise<FirebaseUser> {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
-  } catch (error) {
-    console.error('Google Sign-In Error:', error);
-    throw error;
-  }
-}
 
 export async function logOutFirebase(): Promise<void> {
   await signOut(auth);

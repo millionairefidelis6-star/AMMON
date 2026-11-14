@@ -191,8 +191,68 @@ export async function fetchExecutiveWorkspace(filters?: {
   return apiRequest<ExecutiveWorkspacePayload>(`/api/executive/workspace${qs ? `?${qs}` : ''}`);
 }
 
+export type MemberLoginResponse =
+  | {
+      status: 'OTP_VERIFICATION_REQUIRED';
+      email: string;
+      member: Member;
+    }
+  | {
+      status: 'AUTHENTICATED';
+      member: Member;
+    };
+
+export async function loginMemberApi(
+  identifier: string,
+  password: string
+): Promise<MemberLoginResponse> {
+  return apiRequest<MemberLoginResponse>(
+    '/api/auth/member-login',
+    {
+      method: 'POST',
+      body: JSON.stringify({ identifier, password }),
+    },
+    null
+  );
+}
+
+export async function sendEmailOtpApi(payload: {
+  memberId?: string;
+  email: string;
+}): Promise<{
+  sent: boolean;
+  deliveryMode: 'email' | 'in-app-relay';
+  email: string;
+  expiresInSeconds: number;
+  previewOtp?: string;
+}> {
+  return apiRequest(
+    '/api/auth/send-email-otp',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    null
+  );
+}
+
+export async function verifyEmailOtpApi(payload: {
+  memberId?: string;
+  email: string;
+  otp: string;
+}): Promise<{ verified: boolean; member: Member }> {
+  return apiRequest<{ verified: boolean; member: Member }>(
+    '/api/auth/verify-email-otp',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    null
+  );
+}
+
 export async function registerMemberApi(
-  payload: Partial<Member> & { freeEnrollment?: boolean }
+  payload: Partial<Member> & { freeEnrollment?: boolean; password?: string }
 ): Promise<{ member: Member }> {
   return apiRequest<{ member: Member }>('/api/members', {
     method: 'POST',

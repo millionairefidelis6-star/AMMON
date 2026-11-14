@@ -20,6 +20,7 @@ import { CategoryDetailModal } from './components/CategoryDetailModal';
 import { PaystackDuesModal } from './components/PaystackDuesModal';
 import { SocialSpaceModal } from './components/SocialSpaceModal';
 import { SocialSpaceTab } from './components/SocialSpaceWorkspace';
+import { EmailOtpVerificationModal } from './components/EmailOtpVerificationModal';
 
 import { 
   NEWS_ARTICLES, 
@@ -29,19 +30,14 @@ import {
 import { Member, NewsArticle, EventItem, DisputeTicket, AdminUser, SocialMessage, OnlineMeeting } from './types';
 import { INITIAL_EXECUTIVE_ACCOUNTS } from './data/hierarchyData';
 import { ShieldCheck, X } from 'lucide-react';
-import { auth, onAuthStateChanged, logOutFirebase } from './firebase';
-import { User as FirebaseUser } from 'firebase/auth';
 import {
-  exchangeFirebaseToken,
   fetchPublicMembers,
   getStoredExecutiveToken,
   loginExecutive,
-  registerMemberApi,
   setStoredExecutiveToken,
 } from './services/executiveApi';
 import {
   LEGACY_TEST_MEMBER_IDS,
-  purgeLegacyTestDocsAsAdmin,
   subscribeToMembers,
   subscribeToNews,
   subscribeToDisputes,
@@ -125,16 +121,13 @@ export default function App() {
   const [socialMessages, setSocialMessages] = useState<SocialMessage[]>([]);
   const [meetings, setMeetings] = useState<OnlineMeeting[]>([]);
   
-  // Firebase Authenticated User State
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-
-  // Authenticated Member State
+  // Authenticated Member State (only restored when email OTP is verified)
   const [loggedInMember, setLoggedInMember] = useState<Member | null>(() => {
     try {
       const saved = localStorage.getItem('ammon_logged_in_member');
       if (saved) {
         const parsed = JSON.parse(saved) as Member;
-        if (!parsed?.id || LEGACY_TEST_MEMBER_IDS.has(parsed.id)) {
+        if (!parsed?.id || LEGACY_TEST_MEMBER_IDS.has(parsed.id) || parsed.emailVerified !== true) {
           return null;
         }
         return {
@@ -147,6 +140,10 @@ export default function App() {
       return null;
     }
   });
+
+  // Pending Email OTP Verification Member State
+  const [pendingOtpMember, setPendingOtpMember] = useState<Member | null>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
 
   // Authenticated Admin User State (No default auto-login in production)
   const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
@@ -170,40 +167,8 @@ export default function App() {
 
   // Current member being viewed in modal/card
   const [currentMember, setCurrentMember] = useState<Member | null>(() => {
-    return loggedInMember || members[0] || null;
+    return loggedInMember || null;
   });
-
-  // Firebase Auth State Listener
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user: FirebaseUser | null) => {
-      setFirebaseUser(user);
-      if (user) {
-        const email = user.email?.toLowerCase() || '';
-        const isExecGoogle =
-          email === 'millionairefidelis@gmail.com' ||
-          email === 'superadmin@ammon.ng' ||
-          INITIAL_EXECUTIVE_ACCOUNTS.some((e) => e.email.toLowerCase() === email);
-
-        if (isExecGoogle) {
-          if (!getStoredExecutiveToken()) {
-            user
-              .getIdToken()
-              .then((idToken) => exchangeFirebaseToken(idToken))
-              .then((res) => {
-                setAdminUser(res.executive);
-              })
-              .catch(() => {
-                // Keep existing profile if offline
-              });
-          }
-          if (email === 'millionairefidelis@gmail.com' || email === 'superadmin@ammon.ng') {
-            purgeLegacyTestDocsAsAdmin().catch(() => {});
-          }
-        }
-      }
-    });
-    return () => unsubscribe();
-  }, []);
 
   // Hydrate persistent members from Express backend store + Firestore subscriptions
   useEffect(() => {
@@ -303,103 +268,16 @@ export default function App() {
   // PWA banner state
   const [pwaBannerVisible, setPwaBannerVisible] = useState(true);
 
-  // Google Sign-In Handler
-  const handleGoogleLoginSuccess = async (user: FirebaseUser) => {
-    setFirebaseUser(user);
-    const email = user.email?.toLowerCase() || '';
-    setShowLoginModal(false);
-
-    const execEmailMatch = INITIAL_EXECUTIVE_ACCOUNTS.some((e) => e.email.toLowerCase() === email);
-    if (email === 'millionairefidelis@gmail.com' || execEmailMatch) {
-      try {
-        const idToken = await user.getIdToken();
-        const res = await exchangeFirebaseToken(idToken);
-        setAdminUser(res.executive);
-        setShowAdminModal(true);
-        return;
-      } catch {
-        // fallback if offline
-      }
-      const fallbackExec =
-        INITIAL_EXECUTIVE_ACCOUNTS.find((e) => e.email.toLowerCase() === email) ||
-        INITIAL_EXECUTIVE_ACCOUNTS[0];
-      setAdminUser({
-        ...fallbackExec,
-        fullName: user.displayName || fallbackExec.fullName,
-        email: user.email || fallbackExec.email,
-        avatarUrl: user.photoURL || undefined,
-      });
-      setShowAdminModal(true);
-      return;
-    }
-
-    // Match operator or auto-create verified Google operator (free enrollment)
-    const matched = members.find((m) => m.email.toLowerCase() === email);
-    if (matched) {
-      setLoggedInMember(matched);
-      setCurrentMember(matched);
-      setShowPortalModal(true);
-    } else {
-      const now = new Date();
-      const nextYear = new Date(now);
-      nextYear.setFullYear(now.getFullYear() + 1);
-      const joinedFormatted = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      const expiryFormatted = nextYear.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      const year = now.getFullYear();
-
-      const draftOperator: Partial<Member> & { freeEnrollment: boolean } = {
-        id: `mem-${user.uid.slice(0, 8)}`,
-        membershipId: `AMMON-GOOG-${year}-${Math.floor(10000 + Math.random() * 90000)}`,
-        fullName: user.displayName || 'Google Verified Agent',
-        businessName: `${user.displayName?.split(' ')[0] || 'Google'} Digital Terminal Services`,
-        email: user.email || 'operator@gmail.com',
-        phone: user.phoneNumber || '+234 800 000 0000',
-        zone: 'South West',
-        state: 'Lagos',
-        lga: 'Ikeja',
-        category: 'POS Agents',
-        tier: 'TIER-1',
-        terminalSerialNumber: `POS-${Math.floor(10000000 + Math.random() * 90000000)}`,
-        terminalProvider: 'OPay / Moniepoint',
-        bvnVerified: true,
-        cbnCompliant: true,
-        status: 'Active',
-        joinedDate: joinedFormatted,
-        expiryDate: expiryFormatted,
-        photoUrl: user.photoURL || undefined,
-        duesPaid: true,
-        duesAmount: 0,
-        amountPaid: 0,
-        paymentStatus: 'Paid',
-        freeEnrollment: true,
-      };
-
-      let savedOperator: Member = draftOperator as Member;
-      try {
-        const res = await registerMemberApi(draftOperator);
-        savedOperator = res.member;
-      } catch {
-        // Fallback to local + Firestore persistence if API unreachable
-      }
-
-      setMembers((prev) => mergeRealMembers([[savedOperator], prev]));
-      addMemberToFirestore(savedOperator);
-      setLoggedInMember(savedOperator);
-      setCurrentMember(savedOperator);
-      try {
-        localStorage.setItem('ammon_logged_in_member', JSON.stringify(savedOperator));
-      } catch {}
-      setShowPortalModal(true);
-    }
-  };
-
   // Authentication Handlers
   const handleOpenLogin = (tab?: 'operator' | 'admin') => {
     const resolvedTab: 'operator' | 'admin' = tab === 'admin' ? 'admin' : 'operator';
     setLoginModalTab(resolvedTab);
-    if (resolvedTab === 'operator' && loggedInMember) {
+    if (resolvedTab === 'operator' && loggedInMember && loggedInMember.emailVerified === true) {
       setCurrentMember(loggedInMember);
       setShowPortalModal(true);
+    } else if (resolvedTab === 'operator' && loggedInMember && loggedInMember.emailVerified !== true) {
+      setPendingOtpMember(loggedInMember);
+      setShowOtpModal(true);
     } else if (resolvedTab === 'admin' && adminUser) {
       setShowAdminModal(true);
     } else {
@@ -408,13 +286,19 @@ export default function App() {
   };
 
   const handleLoginSuccess = (member: Member) => {
+    setShowLoginModal(false);
+    if (member.emailVerified !== true) {
+      setPendingOtpMember(member);
+      setShowOtpModal(true);
+      return;
+    }
     setLoggedInMember(member);
     setCurrentMember(member);
     try {
       localStorage.setItem('ammon_logged_in_member', JSON.stringify(member));
     } catch {}
-    setShowLoginModal(false);
     // Open the member's own dashboard immediately
+    setPortalSection('overview');
     setShowPortalModal(true);
   };
 
@@ -444,6 +328,7 @@ export default function App() {
 
   const handleLogout = () => {
     setLoggedInMember(null);
+    setCurrentMember(null);
     try {
       localStorage.removeItem('ammon_logged_in_member');
     } catch {}
@@ -463,12 +348,33 @@ export default function App() {
   const handleRegisteredMember = (newMember: Member) => {
     setMembers((prev) => mergeRealMembers([[newMember], prev]));
     addMemberToFirestore(newMember);
+    // Require email OTP confirmation before granting access to member dashboard or ID card
+    if (newMember.emailVerified !== true) {
+      setPendingOtpMember(newMember);
+      setShowOtpModal(true);
+      return;
+    }
     setLoggedInMember(newMember);
     setCurrentMember(newMember);
     try {
       localStorage.setItem('ammon_logged_in_member', JSON.stringify(newMember));
     } catch {}
-    setShowCardModal(true);
+    setPortalSection('overview');
+    setShowPortalModal(true);
+  };
+
+  const handleEmailOtpVerified = (verifiedMember: Member) => {
+    setMembers((prev) => mergeRealMembers([[verifiedMember], prev]));
+    addMemberToFirestore(verifiedMember);
+    setLoggedInMember(verifiedMember);
+    setCurrentMember(verifiedMember);
+    try {
+      localStorage.setItem('ammon_logged_in_member', JSON.stringify(verifiedMember));
+    } catch {}
+    setShowOtpModal(false);
+    setPendingOtpMember(null);
+    setPortalSection('overview');
+    setShowPortalModal(true);
   };
 
   const handleAddNews = (article: NewsArticle) => {
@@ -565,21 +471,25 @@ export default function App() {
         }}
         onOpenDispute={() => setShowDisputeModal(true)}
         onOpenPortal={() => {
-          const targetMember = loggedInMember || currentMember;
-          if (targetMember) {
-            setCurrentMember(targetMember);
+          if (loggedInMember && loggedInMember.emailVerified === true) {
+            setCurrentMember(loggedInMember);
             setPortalSection('overview');
             setShowPortalModal(true);
+          } else if (loggedInMember && loggedInMember.emailVerified !== true) {
+            setPendingOtpMember(loggedInMember);
+            setShowOtpModal(true);
           } else {
             handleOpenLogin('operator');
           }
         }}
         onOpenCard={() => {
-          const targetMember = loggedInMember || currentMember;
-          if (targetMember) {
-            setCurrentMember(targetMember);
+          if (loggedInMember && loggedInMember.emailVerified === true) {
+            setCurrentMember(loggedInMember);
             setPortalSection('id-card');
             setShowPortalModal(true);
+          } else if (loggedInMember && loggedInMember.emailVerified !== true) {
+            setPendingOtpMember(loggedInMember);
+            setShowOtpModal(true);
           } else {
             handleOpenLogin('operator');
           }
@@ -594,13 +504,8 @@ export default function App() {
         }}
         loggedInMember={loggedInMember}
         adminUser={adminUser}
-        firebaseUser={firebaseUser}
         onLogout={handleLogout}
         onLogoutAdmin={handleAdminLogout}
-        onLogoutGoogle={async () => {
-          await logOutFirebase();
-          setFirebaseUser(null);
-        }}
         onSelectAdmin={handleSelectAdminPersona}
         activeNav={activeNav}
         setActiveNav={setActiveNav}
@@ -620,20 +525,19 @@ export default function App() {
         <QuickActionBar
           onOpenRegister={() => setShowRegisterModal(true)}
           onOpenCardModal={() => {
-            const targetMember = loggedInMember || currentMember;
-            if (loggedInMember) {
+            if (loggedInMember && loggedInMember.emailVerified === true) {
               setCurrentMember(loggedInMember);
               setPortalSection('id-card');
               setShowPortalModal(true);
-            } else if (targetMember) {
-              setCurrentMember(targetMember);
-              setShowCardModal(true);
+            } else if (loggedInMember && loggedInMember.emailVerified !== true) {
+              setPendingOtpMember(loggedInMember);
+              setShowOtpModal(true);
             } else {
               handleOpenLogin('operator');
             }
           }}
           onOpenPaymentModal={() => {
-            if (loggedInMember) {
+            if (loggedInMember && loggedInMember.emailVerified === true) {
               setCurrentMember(loggedInMember);
               setPortalSection('dues');
               setShowPortalModal(true);
@@ -642,7 +546,7 @@ export default function App() {
             }
           }}
           onOpenAcademy={() => {
-            if (loggedInMember) {
+            if (loggedInMember && loggedInMember.emailVerified === true) {
               setCurrentMember(loggedInMember);
               setPortalSection('academy');
               setShowPortalModal(true);
@@ -655,7 +559,7 @@ export default function App() {
             if (eventsElem) eventsElem.scrollIntoView({ behavior: 'smooth' });
           }}
           onOpenSupport={() => {
-            if (loggedInMember) {
+            if (loggedInMember && loggedInMember.emailVerified === true) {
               setCurrentMember(loggedInMember);
               setPortalSection('disputes');
               setShowPortalModal(true);
@@ -726,16 +630,28 @@ export default function App() {
         defaultTab={loginModalTab}
         onClose={() => setShowLoginModal(false)}
         onLoginSuccess={handleLoginSuccess}
+        onRequireEmailOtp={(m) => {
+          setShowLoginModal(false);
+          setPendingOtpMember(m);
+          setShowOtpModal(true);
+        }}
         onAdminLoginSuccess={handleAdminLoginSuccess}
-        onGoogleLoginSuccess={handleGoogleLoginSuccess}
         onOpenRegister={() => {
           setShowLoginModal(false);
           setShowRegisterModal(true);
         }}
       />
 
+      {/* 0b. Email OTP Verification Modal (Mandatory before dashboard access) */}
+      <EmailOtpVerificationModal
+        member={pendingOtpMember}
+        isOpen={showOtpModal}
+        onClose={() => setShowOtpModal(false)}
+        onVerified={handleEmailOtpVerified}
+      />
+
       {/* 1. Digital Membership Card Modal */}
-      {currentMember && (
+      {currentMember && (currentMember.emailVerified === true || Boolean(adminUser)) && (
         <DigitalMembershipCardModal
           member={currentMember}
           isOpen={showCardModal}
@@ -745,7 +661,7 @@ export default function App() {
       )}
 
       {/* 2. Member Portal Modal (Operator's Own Dashboard) */}
-      {currentMember && (
+      {currentMember && currentMember.emailVerified === true && (
         <MemberPortalModal
           member={currentMember}
           members={members}

@@ -238,6 +238,14 @@ export async function addMemberToFirestore(member: Member) {
   }
 }
 
+export async function updateMemberInFirestore(id: string, updates: Partial<Member>) {
+  try {
+    await updateDoc(doc(db, MEMBERS_PATH, id), stripUndefined(updates as unknown as Record<string, unknown>));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${MEMBERS_PATH}/${id}`);
+  }
+}
+
 export async function addNewsToFirestore(article: NewsArticle) {
   try {
     await setDoc(doc(db, NEWS_PATH, article.id), stripUndefined(article as unknown as Record<string, unknown>));

@@ -12,24 +12,26 @@ import {
   ShieldAlert,
   Crown,
   Mail,
-  Loader2
+  Loader2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { Member, AdminUser } from '../types';
-import { signInWithGoogle, sendPasswordReset } from '../firebase';
-import { User as FirebaseUser } from 'firebase/auth';
+import { sendPasswordReset } from '../firebase';
 import {
-  exchangeFirebaseToken,
   loginExecutive,
+  loginMemberApi,
   setupExecutivePassword,
 } from '../services/executiveApi';
+import { verifyMemberPasswordClient } from '../utils/passwordAuth';
 
 interface MemberLoginModalProps {
   members: Member[];
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (member: Member) => void;
+  onRequireEmailOtp?: (member: Member) => void;
   onAdminLoginSuccess?: (admin: AdminUser) => void;
-  onGoogleLoginSuccess?: (user: FirebaseUser) => void;
   onOpenRegister: () => void;
   defaultTab?: 'operator' | 'admin';
 }
@@ -39,8 +41,8 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
+  onRequireEmailOtp,
   onAdminLoginSuccess,
-  onGoogleLoginSuccess,
   onOpenRegister,
   defaultTab = 'operator',
 }) => {
@@ -49,6 +51,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
   // Operator credentials
   const [identifier, setIdentifier] = useState('');
   const [pin, setPin] = useState('');
+  const [showOperatorPassword, setShowOperatorPassword] = useState(false);
 
   // Admin credentials
   const [adminEmail, setAdminEmail] = useState('');
@@ -150,66 +153,91 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleGoogleSignIn = async () => {
-    setErrorMsg('');
-    setIsLoading(true);
-    try {
-      const user = await signInWithGoogle();
-      if (activeTab === 'admin') {
-        try {
-          const idToken = await user.getIdToken();
-          const res = await exchangeFirebaseToken(idToken);
-          if (onAdminLoginSuccess) {
-            onAdminLoginSuccess(res.executive);
-            return;
-          }
-        } catch (exchangeErr) {
-          setErrorMsg(
-            exchangeErr instanceof Error
-              ? exchangeErr.message
-              : 'This Google account is not linked to an AMMON Executive appointment.'
-          );
-          return;
-        }
-      }
-      if (onGoogleLoginSuccess) {
-        onGoogleLoginSuccess(user);
-      }
-    } catch (err: unknown) {
-      console.error('Google Sign-In Failed:', err);
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('popup-closed-by-user')) {
-        setErrorMsg('Google sign-in encountered an error. Please try again.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Handle operator authentication
-  const handleOperatorLoginSubmit = (e: React.FormEvent) => {
+  // Handle strict operator authentication (password match + mandatory email OTP check)
+  const handleOperatorLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+
+    const cleanId = identifier.trim().toLowerCase();
+    if (!cleanId || !pin) {
+      setErrorMsg('Please enter your Membership ID / Email and your account password.');
+      return;
+    }
+
     setIsLoading(true);
+    try {
+      const apiRes = await loginMemberApi(cleanId, pin);
+      if (apiRes.status === 'OTP_VERIFICATION_REQUIRED') {
+        if (onRequireEmailOtp) {
+          onRequireEmailOtp(apiRes.member);
+        } else {
+          setErrorMsg('Email OTP verification is required before entering your dashboard.');
+        }
+        return;
+      }
+      if (apiRes.status === 'AUTHENTICATED') {
+        onLoginSuccess(apiRes.member);
+        return;
+      }
+    } catch (apiErr: unknown) {
+      const errStatus =
+        apiErr && typeof apiErr === 'object' && 'status' in apiErr
+          ? Number((apiErr as { status: unknown }).status)
+          : 0;
+      if (errStatus === 400 || errStatus === 401 || errStatus === 403) {
+        setErrorMsg(
+          apiErr instanceof Error
+            ? apiErr.message
+            : 'Incorrect credentials. Password must match the exact password created during sign-up.'
+        );
+        setIsLoading(false);
+        return;
+      }
 
-    setTimeout(() => {
-      setIsLoading(false);
-      const cleanId = identifier.trim().toLowerCase();
-
+      // Fallback strict verification for static preview / offline Cloud Firestore members
+      const cleanDigits = cleanId.replace(/\s+/g, '');
       const matched = members.find(
         (m) =>
           m.membershipId.toLowerCase() === cleanId ||
-          m.phone.replace(/\s+/g, '').includes(cleanId.replace(/\s+/g, '')) ||
           m.email.toLowerCase() === cleanId ||
-          m.fullName.toLowerCase().includes(cleanId)
+          (cleanDigits.length >= 7 && m.phone.replace(/\s+/g, '').includes(cleanDigits))
       );
 
-      if (matched) {
-        onLoginSuccess(matched);
-      } else {
-        setErrorMsg('No matching registered operator found. Please check your Membership ID, Phone, or Email, or register as a new member.');
+      if (!matched) {
+        setErrorMsg(
+          'No matching registered operator found. Please check your Membership ID, Email, or Phone, or register as a new member.'
+        );
+        setIsLoading(false);
+        return;
       }
-    }, 350);
+
+      const passwordMatches = await verifyMemberPasswordClient(
+        pin,
+        matched.passwordHash,
+        matched.passwordSalt
+      );
+      if (!passwordMatches) {
+        setErrorMsg(
+          'Incorrect password. Please enter the exact password created during registration.'
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      if (matched.emailVerified !== true) {
+        if (onRequireEmailOtp) {
+          onRequireEmailOtp(matched);
+        } else {
+          setErrorMsg('Please verify your registered email address with OTP before logging in.');
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      onLoginSuccess(matched);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Handle unified executive authentication across all hierarchical levels
@@ -519,32 +547,10 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
               {/* TAB 1: POS OPERATOR LOGIN */}
               {activeTab === 'operator' && (
                 <>
-                  {/* Google One-Click Authentication */}
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignIn}
-                    disabled={isLoading}
-                    className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 shadow-xs flex items-center justify-center gap-2.5 transition-all cursor-pointer hover:border-gray-400"
-                  >
-                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                    </svg>
-                    <span>Continue with Google Account</span>
-                  </button>
-
-                  <div className="relative flex items-center my-1">
-                    <div className="flex-grow border-t border-gray-200"></div>
-                    <span className="flex-shrink mx-2 text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or sign in with membership id</span>
-                    <div className="flex-grow border-t border-gray-200"></div>
-                  </div>
-
                   <form onSubmit={handleOperatorLoginSubmit} className="space-y-4">
                     <div>
                       <label className="block font-semibold text-gray-700 mb-1">
-                        Membership ID, Registered Phone, or Email *
+                        Membership ID, Registered Email, or Phone *
                       </label>
                       <div className="relative">
                         <User className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -553,7 +559,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                           required
                           value={identifier}
                           onChange={(e) => setIdentifier(e.target.value)}
-                          placeholder="Enter Membership ID, Phone, or Email"
+                          placeholder="Enter Membership ID, Email, or Phone"
                           className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
                         />
                       </div>
@@ -562,7 +568,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="font-semibold text-gray-700">
-                          Account PIN or Password *
+                          Account Password *
                         </label>
                         <button
                           type="button"
@@ -576,13 +582,21 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                       <div className="relative">
                         <KeyRound className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
-                          type="password"
+                          type={showOperatorPassword ? 'text' : 'password'}
                           required
                           value={pin}
                           onChange={(e) => setPin(e.target.value)}
-                          placeholder="Enter 4-digit PIN or password"
-                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
+                          placeholder="Enter the password created during registration"
+                          className="w-full pl-9 pr-9 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setShowOperatorPassword((v) => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
+                          aria-label={showOperatorPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showOperatorPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
 
@@ -709,29 +723,6 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                 </form>
               ) : (
                 <>
-
-                  {/* Google Authentication for Directorate */}
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignIn}
-                    disabled={isLoading}
-                    className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 text-gray-700 font-semibold rounded-xl border border-gray-300 shadow-xs flex items-center justify-center gap-2.5 transition-all cursor-pointer hover:border-gray-400"
-                  >
-                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                    </svg>
-                    <span>Google Single Sign-On (Officer Email)</span>
-                  </button>
-
-                  <div className="relative flex items-center my-1">
-                    <div className="flex-grow border-t border-gray-200"></div>
-                    <span className="flex-shrink mx-2 text-[10px] text-gray-400 font-semibold uppercase tracking-wider">or sign in with executive email / badge</span>
-                    <div className="flex-grow border-t border-gray-200"></div>
-                  </div>
-
                   {/* Unified Executive Sign-In Form */}
                   <form onSubmit={handleAdminLoginSubmit} className="space-y-3 pt-1">
                     <div>

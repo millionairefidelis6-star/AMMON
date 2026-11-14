@@ -136,11 +136,14 @@ export const DigitalMembershipCardModal: React.FC<DigitalMembershipCardModalProp
                 <div className="grid grid-cols-12 gap-3 items-center py-2 relative z-10">
                   {/* Photo & Hologram Seal */}
                   <div className="col-span-4 flex flex-col items-center">
-                    <div className="w-20 h-24 rounded-lg overflow-hidden border-2 border-[#176B37] shadow-sm relative bg-slate-100">
+                    <div className="w-20 h-24 rounded-lg overflow-hidden border-2 border-[#176B37] shadow-sm relative bg-slate-50 shrink-0">
                       <img
                         src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
                         alt={member.fullName}
-                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+                        }}
+                        className="w-full h-full object-cover object-top"
                         referrerPolicy="no-referrer"
                       />
                       {/* Holographic Security Overlay */}
@@ -251,8 +254,8 @@ export const DigitalMembershipCardModal: React.FC<DigitalMembershipCardModalProp
                 {/* Back Bottom: Signatures and Hotline */}
                 <div className="flex items-end justify-between border-t border-white/15 pt-2 text-[8px] text-emerald-100">
                   <div>
-                    <p className="font-semibold">AMMON Legal Hotline:</p>
-                    <p className="font-mono font-bold text-white text-[10px]">+234 (0) 800 266 6664</p>
+                    <p className="font-semibold">AMMON Legal &amp; HQ Desk:</p>
+                    <p className="font-mono font-bold text-white text-[10px]">07045900900 · ammonngr@gmail.com</p>
                   </div>
                   <div className="text-right">
                     <p className="italic font-serif text-[10px] text-white/90">Babaginda O. S.</p>

@@ -1,26 +1,49 @@
 import React, { useState } from 'react';
-import { X, Lock, ShieldCheck, CheckCircle2, CreditCard } from 'lucide-react';
+import { X, Lock, ShieldCheck, CheckCircle2, CreditCard, AlertCircle } from 'lucide-react';
+import { Member } from '../types';
+import { verifyPaystackApi } from '../services/executiveApi';
 
 interface PaystackDuesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onPaymentVerified?: (member: Member) => void;
 }
 
-export const PaystackDuesModal: React.FC<PaystackDuesModalProps> = ({ isOpen, onClose }) => {
+export const PaystackDuesModal: React.FC<PaystackDuesModalProps> = ({
+  isOpen,
+  onClose,
+  onPaymentVerified,
+}) => {
   const [operatorId, setOperatorId] = useState('');
   const [amount, setAmount] = useState('15000');
   const [processing, setProcessing] = useState(false);
   const [paid, setPaid] = useState(false);
+  const [verifiedRef, setVerifiedRef] = useState('');
+  const [payError, setPayError] = useState('');
 
   if (!isOpen) return null;
 
-  const handlePay = (e: React.FormEvent) => {
+  const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPayError('');
     setProcessing(true);
-    setTimeout(() => {
-      setProcessing(false);
+    const ref = `PSK-DUES-${Date.now().toString().slice(-7)}`;
+    try {
+      const res = await verifyPaystackApi(operatorId.trim(), ref, Number(amount));
+      setVerifiedRef(ref);
       setPaid(true);
-    }, 1500);
+      if (onPaymentVerified) {
+        onPaymentVerified(res.member);
+      }
+    } catch (err) {
+      setPayError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to verify Membership ID with Paystack backend gateway.'
+      );
+    } finally {
+      setProcessing(false);
+    }
   };
 
   return (
@@ -49,17 +72,22 @@ export const PaystackDuesModal: React.FC<PaystackDuesModalProps> = ({ isOpen, on
 
         {/* Content */}
         <div className="p-6 space-y-4 text-xs">
+          {payError && (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <span>{payError}</span>
+            </div>
+          )}
           {paid ? (
             <div className="bg-[#EAF3ED] p-6 rounded-2xl border border-[#176B37]/30 text-center space-y-3">
               <div className="w-12 h-12 rounded-full bg-[#176B37] text-white flex items-center justify-center mx-auto">
                 <CheckCircle2 className="w-6 h-6 text-white" />
               </div>
               <h4 className="text-sm font-extrabold text-[#14532D]">
-                Payment Received & Recorded!
+                Backend Verified &amp; Recorded!
               </h4>
               <p className="text-gray-600 leading-relaxed text-xs">
-                Your annual dues of <strong>₦{Number(amount).toLocaleString()}</strong> have been verified via Paystack. 
-                Your digital membership card has been updated automatically.
+                Your annual dues of <strong>₦{Number(amount).toLocaleString()}</strong> have been verified on the backend via Paystack (Ref: <strong className="font-mono">{verifiedRef}</strong>).
               </p>
               <button
                 onClick={onClose}
@@ -87,7 +115,7 @@ export const PaystackDuesModal: React.FC<PaystackDuesModalProps> = ({ isOpen, on
                   required
                   value={operatorId}
                   onChange={(e) => setOperatorId(e.target.value)}
-                  placeholder="e.g. AMMON-LAG-2025-08492"
+                  placeholder="Enter your AMMON Membership ID"
                   className="w-full p-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono"
                 />
               </div>

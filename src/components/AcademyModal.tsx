@@ -6,7 +6,7 @@ import { downloadAcademyCertificate } from '../utils/documentGenerators';
 interface AcademyModalProps {
   isOpen: boolean;
   onClose: () => void;
-  member: Member;
+  member?: Member | null;
 }
 
 export const AcademyModal: React.FC<AcademyModalProps> = ({ isOpen, onClose, member }) => {
@@ -153,13 +153,19 @@ export const AcademyModal: React.FC<AcademyModalProps> = ({ isOpen, onClose, mem
           </div>
 
           <div className="pt-2 border-t border-[#E5E7EB] text-center">
-            <button
-              onClick={() => downloadAcademyCertificate(member)}
-              className="py-2.5 px-6 bg-[#176B37] hover:bg-[#14532D] text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-2 shadow-xs"
-            >
-              <Award className="w-4 h-4" />
-              <span>Download Official Operator Certificate (PDF)</span>
-            </button>
+            {member ? (
+              <button
+                onClick={() => downloadAcademyCertificate(member)}
+                className="py-2.5 px-6 bg-[#176B37] hover:bg-[#14532D] text-white font-bold rounded-xl text-xs transition-colors cursor-pointer inline-flex items-center gap-2 shadow-xs"
+              >
+                <Award className="w-4 h-4" />
+                <span>Download Official Operator Certificate (PDF)</span>
+              </button>
+            ) : (
+              <p className="text-[11px] text-gray-500">
+                Complete free member registration or sign in to download your personalized AMMON Academy certificate.
+              </p>
+            )}
           </div>
         </div>
       </div>

@@ -19,6 +19,12 @@ import {
   updateDoc,
   onSnapshot
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
@@ -27,8 +33,16 @@ const app = initializeApp(firebaseConfig);
 // CRITICAL: Must pass firestoreDatabaseId
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
-export { onAuthStateChanged, sendPasswordResetEmail, type FirebaseUser };
+export {
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  storageRef,
+  uploadBytes,
+  getDownloadURL,
+  type FirebaseUser,
+};
 
 // Standard Error Handler per Firebase Integration Skill
 export enum OperationType {

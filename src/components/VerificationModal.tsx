@@ -71,8 +71,7 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
         <div className="p-6 overflow-y-auto space-y-5 text-xs">
           <p className="text-gray-600 leading-relaxed">
             Verify the authenticity of any POS kiosk, merchant terminal, or mobile money operator across Nigeria. 
-            Enter the Operator Membership ID (e.g. <strong className="font-mono text-[#176B37]">AMMON-LAG-2025-08492</strong>) 
-            or Terminal Serial Number.
+            Enter the Operator Membership ID, Terminal Serial Number, or registered phone number.
           </p>
 
           {/* Search Form */}
@@ -113,30 +112,43 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div>
-                      <span className="text-gray-500 text-[10px] uppercase font-semibold">Operator Name</span>
-                      <p className="font-bold text-gray-900">{foundMember.fullName}</p>
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-16 h-20 rounded-xl overflow-hidden border-2 border-[#176B37] bg-white shadow-xs shrink-0">
+                      <img
+                        src={foundMember.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
+                        alt={foundMember.fullName}
+                        onError={(e) => {
+                          e.currentTarget.src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+                        }}
+                        className="w-full h-full object-cover object-top"
+                        referrerPolicy="no-referrer"
+                      />
                     </div>
-                    <div>
-                      <span className="text-gray-500 text-[10px] uppercase font-semibold">Registered Outlet</span>
-                      <p className="font-bold text-gray-900">{foundMember.businessName}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-[10px] uppercase font-semibold">Membership Number</span>
-                      <p className="font-mono font-bold text-[#176B37]">{foundMember.membershipId}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-[10px] uppercase font-semibold">Location</span>
-                      <p className="font-medium text-gray-800">{foundMember.lga}, {foundMember.state} State</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-[10px] uppercase font-semibold">Terminal Provider</span>
-                      <p className="font-medium text-gray-800">{foundMember.terminalProvider}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 text-[10px] uppercase font-semibold">Terminal S/N</span>
-                      <p className="font-mono text-gray-800">{foundMember.terminalSerialNumber}</p>
+                    <div className="grid grid-cols-2 gap-2.5 text-xs flex-1">
+                      <div>
+                        <span className="text-gray-500 text-[10px] uppercase font-semibold">Operator Name</span>
+                        <p className="font-bold text-gray-900">{foundMember.fullName}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-[10px] uppercase font-semibold">Registered Outlet</span>
+                        <p className="font-bold text-gray-900">{foundMember.businessName}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-[10px] uppercase font-semibold">Membership Number</span>
+                        <p className="font-mono font-bold text-[#176B37]">{foundMember.membershipId}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-[10px] uppercase font-semibold">Location</span>
+                        <p className="font-medium text-gray-800">{foundMember.lga}, {foundMember.state} State</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-[10px] uppercase font-semibold">Terminal Provider</span>
+                        <p className="font-medium text-gray-800">{foundMember.terminalProvider}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-[10px] uppercase font-semibold">Terminal S/N</span>
+                        <p className="font-mono text-gray-800">{foundMember.terminalSerialNumber}</p>
+                      </div>
                     </div>
                   </div>
 
@@ -160,22 +172,32 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
             </div>
           )}
 
-          {/* Quick Demo Test Buttons */}
+          {/* Live Enrolled Registry Quick Lookup */}
           <div className="pt-3 border-t border-[#E5E7EB]">
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5">
-              Try Sample Verified Operator IDs:
+              Enrolled Registry ({members.length.toLocaleString()} {members.length === 1 ? 'Member' : 'Members'}):
             </span>
-            <div className="flex flex-wrap gap-2">
-              {['AMMON-LAG-2025-08492', 'AMMON-ABJ-2025-01042', 'AMMON-KAN-2025-03120'].map((id) => (
-                <button
-                  key={id}
-                  onClick={() => { setSearchTerm(id); setSearched(true); }}
-                  className="font-mono text-[11px] bg-gray-100 hover:bg-[#EAF3ED] hover:text-[#176B37] px-2.5 py-1 rounded-lg border border-gray-200 transition-colors cursor-pointer"
-                >
-                  {id}
-                </button>
-              ))}
-            </div>
+            {members.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {members.slice(0, 3).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm(m.membershipId);
+                      setSearched(true);
+                    }}
+                    className="font-mono text-[11px] bg-gray-100 hover:bg-[#EAF3ED] hover:text-[#176B37] px-2.5 py-1 rounded-lg border border-gray-200 transition-colors cursor-pointer"
+                  >
+                    {m.membershipId}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-500">
+                No operators enrolled yet. Complete member registration to verify live credentials here.
+              </p>
+            )}
           </div>
 
         </div>

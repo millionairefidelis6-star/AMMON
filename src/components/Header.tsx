@@ -19,11 +19,12 @@ import {
   Crown,
   Briefcase,
   ShieldAlert,
-  LayoutDashboard
+  LayoutDashboard,
+  MessageSquare,
+  Video
 } from 'lucide-react';
 import { AmmonLogo } from './AmmonLogo';
 import { Member, AdminUser } from '../types';
-import { ADMIN_USERS } from '../data/mockData';
 import { User as FirebaseUser } from 'firebase/auth';
 
 interface HeaderProps {
@@ -34,6 +35,8 @@ interface HeaderProps {
   onOpenDispute: () => void;
   onOpenPortal: () => void;
   onOpenCard: () => void;
+  onOpenSocial?: () => void;
+  onOpenMeetings?: () => void;
   loggedInMember: Member | null;
   adminUser?: AdminUser | null;
   firebaseUser?: FirebaseUser | null;
@@ -53,6 +56,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenDispute,
   onOpenPortal,
   onOpenCard,
+  onOpenSocial,
+  onOpenMeetings,
   loggedInMember,
   adminUser,
   firebaseUser,
@@ -218,18 +223,40 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Disputes
             </button>
+
+            {/* Social Space (WhatsApp-style) */}
+            {onOpenSocial && (
+              <button
+                onClick={onOpenSocial}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-[#176B37] bg-[#EAF3ED] hover:bg-[#176B37] hover:text-white transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Social</span>
+              </button>
+            )}
+
+            {/* Online Meetings */}
+            {onOpenMeetings && (
+              <button
+                onClick={onOpenMeetings}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-[#14532D] bg-emerald-100/70 hover:bg-[#14532D] hover:text-white transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Video className="w-3.5 h-3.5" />
+                <span>Meetings</span>
+              </button>
+            )}
           </nav>
 
           {/* Right: Side-by-side icons on the SAME LINE as dashboard icon */}
           <div className="flex items-center justify-end gap-1 sm:gap-2 shrink-0">
             
-            {/* 1. Location Icon & Text (Lagos, Nigeria) */}
+            {/* 1. Location Icon & Text (Abuja, Nigeria) */}
             <div 
               className="flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-[#176B37] bg-[#EAF3ED] px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-full border border-emerald-200 shadow-2xs shrink-0 select-none"
-              title="AMMON National Headquarters - Lagos, Nigeria"
+              title="AMMON National HQ - 46 Dala Hills Street, Brains & Hammers Estate, Galadimawa, Abuja"
             >
               <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#176B37] shrink-0" />
-              <span className="leading-none">Lagos<span className="hidden md:inline">, Nigeria</span></span>
+              <span className="leading-none">Abuja<span className="hidden md:inline">, Nigeria</span></span>
             </div>
 
             {/* 2. Notification Icon (Bell with Badge) */}
@@ -289,7 +316,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
 
-            {/* 3. Test Persona Switcher (Super Admin / Executive) */}
+            {/* 3. Authenticated Executive Menu / Executive Sign-In Trigger */}
             {adminUser ? (
               <div className="relative shrink-0">
                 <button
@@ -305,7 +332,7 @@ export const Header: React.FC<HeaderProps> = ({
                       ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
                       : 'bg-emerald-50 hover:bg-emerald-100 text-[#176B37] border-emerald-300'
                   }`}
-                  title={`${adminUser.title} (${adminUser.role}) - Click to switch persona`}
+                  title={`${adminUser.title} (${adminUser.role})`}
                 >
                   {adminUser.role === 'Super Admin' ? (
                     <Crown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-600 shrink-0" />
@@ -352,36 +379,6 @@ export const Header: React.FC<HeaderProps> = ({
                       <ArrowRight className="w-3.5 h-3.5 text-[#176B37]" />
                     </button>
 
-                    {/* Quick switch between Super Admin & Executive */}
-                    <div className="px-4 py-1.5 bg-gray-50 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-t border-b border-gray-100">
-                      Switch Test Persona:
-                    </div>
-                    {ADMIN_USERS.map((officer) => (
-                      <button
-                        key={officer.id}
-                        onClick={() => {
-                          setAdminMenuOpen(false);
-                          if (onSelectAdmin) onSelectAdmin(officer);
-                        }}
-                        className={`w-full text-left px-4 py-2 text-xs hover:bg-[#EAF3ED] cursor-pointer flex items-center justify-between ${
-                          adminUser.id === officer.id ? 'font-bold text-[#176B37] bg-emerald-50/60' : 'text-gray-700'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {officer.role === 'Super Admin' ? (
-                            <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                          ) : (
-                            <Briefcase className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          )}
-                          <div className="min-w-0">
-                            <p className="truncate text-xs font-medium">{officer.fullName}</p>
-                            <p className="text-[10px] text-gray-400 truncate">{officer.role} • {officer.jurisdiction.split(' ')[0]}</p>
-                          </div>
-                        </div>
-                        {adminUser.id === officer.id && <CheckCircle2 className="w-3.5 h-3.5 text-[#176B37] shrink-0" />}
-                      </button>
-                    ))}
-
                     <div className="border-t border-gray-100 mt-1 pt-1">
                       <button
                         onClick={() => {
@@ -400,7 +397,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={onOpenAdmin}
                 className="flex items-center gap-1 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shrink-0 shadow-2xs"
-                title="Directorate Login / Test Persona"
+                title="Executive & Directorate Login"
               >
                 <Crown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-600 shrink-0" />
                 <span>Admin</span>
@@ -618,11 +615,29 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Report Dispute / Harassment</span>
               <PhoneCall className="w-4 h-4" />
             </button>
+            {onOpenSocial && (
+              <button
+                onClick={() => { setMobileMenuOpen(false); onOpenSocial(); }}
+                className="text-left px-4 py-2.5 rounded-lg text-sm font-semibold text-[#176B37] bg-[#EAF3ED] flex items-center justify-between cursor-pointer"
+              >
+                <span>AMMON Social Space (Chat)</span>
+                <MessageSquare className="w-4 h-4" />
+              </button>
+            )}
+            {onOpenMeetings && (
+              <button
+                onClick={() => { setMobileMenuOpen(false); onOpenMeetings(); }}
+                className="text-left px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#176B37] flex items-center justify-between cursor-pointer"
+              >
+                <span>Online Video Meetings</span>
+                <Video className="w-4 h-4" />
+              </button>
+            )}
 
             {/* Quick contact helpline inside drawer */}
             <div className="px-4 py-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200 text-xs text-[#176B37] flex items-center justify-between">
-              <span className="font-semibold">Hotline:</span>
-              <span className="font-mono font-bold">+234 (0) 800 266 6664</span>
+              <span className="font-semibold">National HQ Hotline:</span>
+              <span className="font-mono font-bold">07045900900</span>
             </div>
 
             <div className="pt-3 border-t border-[#E5E7EB] flex flex-col gap-2">

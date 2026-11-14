@@ -28,9 +28,11 @@ import {
   ChevronRight,
   ExternalLink,
   Copy,
-  Check
+  Check,
+  MessageSquare,
+  Video
 } from 'lucide-react';
-import { Member, DisputeTicket } from '../types';
+import { Member, DisputeTicket, SocialMessage, OnlineMeeting } from '../types';
 import { QRCodeSvg } from './QRCodeSvg';
 import { AmmonLogo } from './AmmonLogo';
 import {
@@ -38,6 +40,7 @@ import {
   DashboardServicesWorkspace,
   ServiceSectionId,
 } from './DashboardServicesWorkspace';
+import { SocialSpaceWorkspace } from './SocialSpaceWorkspace';
 import { 
   downloadDigitalCardPng, 
   printDigitalCardDocument, 
@@ -55,10 +58,13 @@ export type DashboardSection =
   | 'legal'
   | 'academy'
   | 'disputes'
+  | 'social-space'
+  | 'online-meetings'
   | ServiceSectionId;
 
 interface MemberPortalModalProps {
   member: Member;
+  members?: Member[];
   isOpen: boolean;
   onClose: () => void;
   onOpenCardModal?: () => void;
@@ -66,16 +72,33 @@ interface MemberPortalModalProps {
   onPayDues?: () => void;
   onLogout?: () => void;
   initialSection?: DashboardSection;
+  socialMessages?: SocialMessage[];
+  meetings?: OnlineMeeting[];
+  onSendMessage?: (msg: SocialMessage) => void;
+  onUpdateMessage?: (id: string, updates: Partial<SocialMessage>) => void;
+  onCreateMeeting?: (meeting: OnlineMeeting) => void;
+  onUpdateMeeting?: (id: string, updates: Partial<OnlineMeeting>) => void;
 }
 
 export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
   member,
+  members = [],
   isOpen,
   onClose,
   onLogout,
   initialSection = 'overview',
+  socialMessages = [],
+  meetings = [],
+  onSendMessage = () => {},
+  onUpdateMessage = () => {},
+  onCreateMeeting = () => {},
+  onUpdateMeeting = () => {},
 }) => {
   const [activeSection, setActiveSection] = useState<DashboardSection>(initialSection);
+
+  React.useEffect(() => {
+    setActiveSection(initialSection);
+  }, [initialSection]);
   const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false);
   const [cardFlipped, setCardFlipped] = useState(false);
   const [isDownloadingCard, setIsDownloadingCard] = useState(false);
@@ -210,7 +233,10 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                   <img
                     src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
                     alt={member.fullName}
-                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+                    }}
+                    className="w-full h-full object-cover object-top"
                     referrerPolicy="no-referrer"
                   />
                 </div>
@@ -326,6 +352,79 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                 );
               })}
             </div>
+
+            {/* Left-Justified Community Social Space & Online Meetings Group */}
+            <div className="pt-3 mt-3 border-t border-gray-100 space-y-1">
+              <span className="px-3 text-[10px] font-bold text-[#176B37] uppercase tracking-wider block mb-1.5 text-left">
+                Community &amp; Meetings
+              </span>
+
+              <button
+                onClick={() => {
+                  setActiveSection('social-space');
+                  setSidebarOpenMobile(false);
+                }}
+                className={`
+                  w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-semibold
+                  transition-all duration-150 cursor-pointer group
+                  ${activeSection === 'social-space'
+                    ? 'bg-[#176B37] text-white shadow-xs'
+                    : 'text-[#252525] hover:bg-[#EAF3ED] hover:text-[#176B37]'}
+                `}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`
+                    w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors
+                    ${activeSection === 'social-space' ? 'bg-white/20 text-white' : 'bg-[#EAF3ED]/70 text-[#176B37] group-hover:bg-white'}
+                  `}>
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <span className="truncate text-left">AMMON Social Space</span>
+                </div>
+                <span className={`
+                  text-[9px] px-2 py-0.5 rounded-full font-medium shrink-0 ml-1
+                  ${activeSection === 'social-space' ? 'bg-white/20 text-white' : 'bg-[#EAF3ED] text-[#176B37] group-hover:bg-white'}
+                `}>
+                  {socialMessages.length} Chat
+                </span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveSection('online-meetings');
+                  setSidebarOpenMobile(false);
+                }}
+                className={`
+                  w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-semibold
+                  transition-all duration-150 cursor-pointer group
+                  ${activeSection === 'online-meetings'
+                    ? 'bg-[#176B37] text-white shadow-xs'
+                    : 'text-[#252525] hover:bg-[#EAF3ED] hover:text-[#176B37]'}
+                `}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`
+                    w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors
+                    ${activeSection === 'online-meetings' ? 'bg-white/20 text-white' : 'bg-[#EAF3ED]/70 text-[#176B37] group-hover:bg-white'}
+                  `}>
+                    <Video className="w-4 h-4" />
+                  </div>
+                  <span className="truncate text-left">Online Meetings</span>
+                </div>
+                <span className={`
+                  text-[9px] px-2 py-0.5 rounded-full font-medium shrink-0 ml-1
+                  ${activeSection === 'online-meetings'
+                    ? 'bg-white/20 text-white'
+                    : meetings.some((m) => m.status === 'Live')
+                    ? 'bg-red-100 text-red-700 font-bold'
+                    : 'bg-gray-100 text-gray-600'}
+                `}>
+                  {meetings.filter((m) => m.status === 'Live').length > 0
+                    ? `${meetings.filter((m) => m.status === 'Live').length} Live`
+                    : `${meetings.length} Rooms`}
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Sidebar Bottom Footer Actions */}
@@ -378,8 +477,12 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                 <span className="text-gray-400 font-medium hidden sm:inline">Member Portal</span>
                 <span className="text-gray-400 hidden sm:inline">/</span>
                 <h2 className="text-sm sm:text-base font-bold text-[#252525]">
-                  {navItems.find((n) => n.id === activeSection)?.label ||
-                    DASHBOARD_SERVICES_MENU.find((s) => s.id === activeSection)?.label}
+                  {activeSection === 'social-space'
+                    ? 'AMMON Social Space'
+                    : activeSection === 'online-meetings'
+                    ? 'Online Meetings & Video Rooms'
+                    : navItems.find((n) => n.id === activeSection)?.label ||
+                      DASHBOARD_SERVICES_MENU.find((s) => s.id === activeSection)?.label}
                 </h2>
               </div>
             </div>
@@ -402,8 +505,8 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
           </header>
 
           {/* Scrollable Dashboard Viewport */}
-          <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#F9FBFA]/60">
-            <div className="max-w-4xl mx-auto space-y-6">
+          <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#F9FBFA]/60 min-w-0">
+            <div className={`${activeSection === 'social-space' || activeSection === 'online-meetings' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto space-y-6 min-w-0`}>
 
               {/* 1. OVERVIEW & STATISTICS */}
               {activeSection === 'overview' && (
@@ -646,11 +749,14 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
 
                           <div className="grid grid-cols-12 gap-3 items-center py-2 relative z-10">
                             <div className="col-span-4 flex flex-col items-center">
-                              <div className="w-20 h-24 rounded-lg overflow-hidden border-2 border-[#176B37] shadow-sm relative bg-slate-100">
+                              <div className="w-20 h-24 rounded-lg overflow-hidden border-2 border-[#176B37] shadow-sm relative bg-slate-50 shrink-0">
                                 <img
                                   src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
                                   alt={member.fullName}
-                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    e.currentTarget.src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+                                  }}
+                                  className="w-full h-full object-cover object-top"
                                   referrerPolicy="no-referrer"
                                 />
                                 <div className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-[#176B37] text-white flex items-center justify-center text-[7px] font-extrabold border border-white">
@@ -717,8 +823,8 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                           </div>
                           <div className="flex items-end justify-between border-t border-white/20 pt-2 text-[8px] text-emerald-100">
                             <div>
-                              <p className="font-semibold">Legal Hotline:</p>
-                              <p className="font-mono font-bold text-white text-[10px]">+234 (0) 800 266 6664</p>
+                              <p className="font-semibold">HQ &amp; Legal Desk:</p>
+                              <p className="font-mono font-bold text-white text-[10px]">07045900900 · ammonngr@gmail.com</p>
                             </div>
                             <div className="text-right">
                               <p className="italic font-serif text-[10px] text-white/90">Babaginda O. S.</p>
@@ -1124,6 +1230,29 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                   roleLabel="Certified Operator"
                   onSelectService={(id) => setActiveSection(id)}
                 />
+              )}
+
+              {/* 9. AMMON SOCIAL SPACE & ONLINE MEETINGS */}
+              {(activeSection === 'social-space' || activeSection === 'online-meetings') && (
+                <div className="animate-in fade-in duration-150 min-w-0">
+                  <SocialSpaceWorkspace
+                    currentUser={{
+                      id: member.id,
+                      name: member.fullName,
+                      role: member.category === 'Super Agents' ? 'Super Agent' : 'POS Agent',
+                      badge: member.membershipId,
+                      avatar: member.photoUrl,
+                    }}
+                    members={members}
+                    messages={socialMessages}
+                    meetings={meetings}
+                    onSendMessage={onSendMessage}
+                    onUpdateMessage={onUpdateMessage}
+                    onCreateMeeting={onCreateMeeting}
+                    onUpdateMeeting={onUpdateMeeting}
+                    initialTab={activeSection === 'online-meetings' ? 'meetings' : 'chat'}
+                  />
+                </div>
               )}
 
             </div>

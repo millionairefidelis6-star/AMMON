@@ -1,4 +1,5 @@
 import { Member, NewsArticle } from '../types';
+import { drawImageCoverToCanvas } from './imageProcessor';
 
 /**
  * Trigger browser file download from Blob
@@ -113,20 +114,62 @@ export async function downloadDigitalCardPng(member: Member) {
   const photoH = 280;
 
   // Photo border & background
-  ctx.fillStyle = '#E5E7EB';
+  ctx.fillStyle = '#F8FAFC';
   ctx.fillRect(photoX, photoY, photoW, photoH);
+
+  // Load and auto-fit Member Passport Photograph directly into ID Card passport frame
+  let drewPassportPhoto = false;
+  if (member.photoUrl) {
+    const memberImg = new Image();
+    if (!member.photoUrl.startsWith('data:')) {
+      memberImg.crossOrigin = 'anonymous';
+    }
+    memberImg.src = member.photoUrl;
+    try {
+      await new Promise<void>((resolve) => {
+        memberImg.onload = () => resolve();
+        memberImg.onerror = () => resolve();
+        setTimeout(resolve, 2500);
+      });
+      if (memberImg.complete && memberImg.naturalWidth > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(photoX, photoY, photoW, photoH - 40);
+        ctx.clip();
+        drawImageCoverToCanvas(
+          ctx,
+          memberImg,
+          memberImg.naturalWidth,
+          memberImg.naturalHeight,
+          photoX,
+          photoY,
+          photoW,
+          photoH - 40,
+          0.5,
+          0.22
+        );
+        ctx.restore();
+        drewPassportPhoto = true;
+      }
+    } catch {
+      drewPassportPhoto = false;
+    }
+  }
+
+  if (!drewPassportPhoto) {
+    // Fallback silhouette if image cannot be fetched cross-origin
+    ctx.fillStyle = '#14532D';
+    ctx.beginPath();
+    ctx.arc(photoX + photoW / 2, photoY + 100, 55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(photoX + photoW / 2, photoY + 270, 95, Math.PI, 0);
+    ctx.fill();
+  }
+
   ctx.strokeStyle = '#176B37';
   ctx.lineWidth = 6;
   ctx.strokeRect(photoX, photoY, photoW, photoH);
-
-  // Inner photo placeholder / silhouette
-  ctx.fillStyle = '#14532D';
-  ctx.beginPath();
-  ctx.arc(photoX + photoW / 2, photoY + 100, 55, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(photoX + photoW / 2, photoY + 270, 95, Math.PI, 0);
-  ctx.fill();
 
   // Photo Badge
   ctx.fillStyle = '#176B37';
@@ -249,8 +292,8 @@ export function printDigitalCardDocument(member: Member) {
     .card-top p { margin: 2px 0 0; font-size: 10px; color: #EAF3ED; }
     .badge { background: #14532D; color: #fff; padding: 4px 10px; border-radius: 99px; font-size: 10px; font-weight: bold; }
     .card-body { padding: 12px 16px; display: flex; gap: 14px; }
-    .photo-box { width: 85px; height: 110px; border: 2px solid #176B37; border-radius: 8px; background: #EAF3ED; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; color: #176B37; text-align: center; overflow: hidden; }
-    .photo-box img { width: 100%; height: 100%; object-fit: cover; }
+    .photo-box { width: 85px; height: 110px; border: 2px solid #176B37; border-radius: 8px; background: #F8FAFC; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; color: #176B37; text-align: center; overflow: hidden; flex-shrink: 0; }
+    .photo-box img { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; display: block; }
     .info-box { flex: 1; }
     .label { font-size: 9px; color: #666; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
     .val { font-size: 13px; font-weight: 800; color: #252525; margin-bottom: 8px; }
@@ -273,7 +316,7 @@ export function printDigitalCardDocument(member: Member) {
 
   <div class="header">
     <h1>ASSOCIATION OF MOBILE MONEY OPERATORS OF NIGERIA (AMMON)</h1>
-    <p>National Secretariat: Plot 14, Commercial Avenue, Yaba, Lagos | CAC/IT/NO/129481 | Recognized by Central Bank of Nigeria</p>
+    <p>National HQ: 46 Dala Hills Street, Brains &amp; Hammers Estate, Galadimawa, Abuja | CAC/IT/NO/129481 | Recognized by CBN</p>
   </div>
 
   <div class="card-wrap">
@@ -328,7 +371,7 @@ export function printDigitalCardDocument(member: Member) {
       <div style="display:flex; justify-content:space-between; align-items:flex-end; font-size:9px; border-top:1px solid rgba(255,255,255,0.2); padding-top:6px;">
         <div>
           <strong>Emergency Helpline:</strong><br>
-          +234 (0) 800 266 6664 | info@ammon.ng
+          07045900900 | ammonngr@gmail.com
         </div>
         <div style="text-align:right;">
           <em>Babaginda O. S.</em><br>
@@ -492,7 +535,7 @@ export function downloadPaymentReceipt(member: Member) {
     <div>
       <h2>AMMON NIGERIA</h2>
       <p>Association of Mobile Money Operators of Nigeria</p>
-      <p>National Secretariat, Commercial Ave, Yaba, Lagos</p>
+      <p>National HQ: 46 Dala Hills Street, Brains &amp; Hammers Estate, Galadimawa, Abuja · ammonngr@gmail.com</p>
     </div>
     <div style="text-align:right;">
       <div style="color:#097939; font-weight:800; font-size:12px;">PAYSTACK SECURED</div>

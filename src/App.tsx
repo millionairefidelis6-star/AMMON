@@ -18,51 +18,112 @@ import { EventModal } from './components/EventModal';
 import { AcademyModal } from './components/AcademyModal';
 import { CategoryDetailModal } from './components/CategoryDetailModal';
 import { PaystackDuesModal } from './components/PaystackDuesModal';
+import { SocialSpaceModal } from './components/SocialSpaceModal';
+import { SocialSpaceTab } from './components/SocialSpaceWorkspace';
 
 import { 
-  INITIAL_MEMBERS, 
   NEWS_ARTICLES, 
   UPCOMING_EVENTS, 
   MEMBERSHIP_CATEGORIES_DATA, 
-  INITIAL_DISPUTES,
-  ADMIN_USERS
 } from './data/mockData';
-import { Member, NewsArticle, EventItem, DisputeTicket, AdminUser } from './types';
-import { ShieldCheck, Download, Smartphone, X, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Member, NewsArticle, EventItem, DisputeTicket, AdminUser, SocialMessage, OnlineMeeting } from './types';
+import { INITIAL_EXECUTIVE_ACCOUNTS } from './data/hierarchyData';
+import { ShieldCheck, X } from 'lucide-react';
 import { auth, onAuthStateChanged, logOutFirebase } from './firebase';
 import { User as FirebaseUser } from 'firebase/auth';
 import {
+  exchangeFirebaseToken,
+  fetchPublicMembers,
+  getStoredExecutiveToken,
+  loginExecutive,
+  registerMemberApi,
+  setStoredExecutiveToken,
+} from './services/executiveApi';
+import {
+  LEGACY_TEST_MEMBER_IDS,
+  purgeLegacyTestDocsAsAdmin,
   subscribeToMembers,
   subscribeToNews,
   subscribeToDisputes,
+  subscribeToSocialMessages,
+  subscribeToMeetings,
   addMemberToFirestore,
   addNewsToFirestore,
   addDisputeToFirestore,
   updateDisputeInFirestore,
+  addSocialMessageToFirestore,
+  updateSocialMessageInFirestore,
+  addMeetingToFirestore,
+  updateMeetingInFirestore,
   seedInitialFirestoreData,
 } from './services/firestoreService';
 
+const PROD_RESET_KEY = 'ammon_prod_reset_v1';
+
+function mergeRealMembers(sources: Member[][]): Member[] {
+  const byId = new Map<string, Member>();
+  for (const list of sources) {
+    for (const m of list) {
+      if (m && m.id && !LEGACY_TEST_MEMBER_IDS.has(m.id)) {
+        byId.set(m.id, m);
+      }
+    }
+  }
+  return Array.from(byId.values());
+}
+
 export default function App() {
-  // Application Data State with localStorage persistence
+  // Perform one-time purge of legacy seeded test data from localStorage
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(PROD_RESET_KEY)) {
+        const rawMembers = localStorage.getItem('ammon_members');
+        if (rawMembers) {
+          const parsed = JSON.parse(rawMembers) as Member[];
+          const cleaned = parsed.filter((m) => m && m.id && !LEGACY_TEST_MEMBER_IDS.has(m.id));
+          localStorage.setItem('ammon_members', JSON.stringify(cleaned));
+        }
+        const rawLogged = localStorage.getItem('ammon_logged_in_member');
+        if (rawLogged) {
+          const parsedLogged = JSON.parse(rawLogged) as Member;
+          if (!parsedLogged?.id || LEGACY_TEST_MEMBER_IDS.has(parsedLogged.id)) {
+            localStorage.removeItem('ammon_logged_in_member');
+          }
+        }
+        if (!getStoredExecutiveToken()) {
+          localStorage.removeItem('ammon_logged_in_admin');
+        }
+        localStorage.setItem(PROD_RESET_KEY, '1');
+      }
+    } catch {
+      // Ignore storage parsing errors
+    }
+  }, []);
+
+  // Application Data State with localStorage persistence (starts at 0 enrolled members)
   const [members, setMembers] = useState<Member[]>(() => {
     try {
       const saved = localStorage.getItem('ammon_members');
       if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed.map((m: Member) => ({
-          ...m,
-          photoUrl: m.photoUrl ? m.photoUrl.replace('/src/assets/images/', '/assets/images/') : m.photoUrl
-        }));
+        const parsed = JSON.parse(saved) as Member[];
+        return parsed
+          .filter((m) => m && m.id && !LEGACY_TEST_MEMBER_IDS.has(m.id))
+          .map((m: Member) => ({
+            ...m,
+            photoUrl: m.photoUrl ? m.photoUrl.replace('/src/assets/images/', '/assets/images/') : m.photoUrl,
+          }));
       }
-      return INITIAL_MEMBERS;
+      return [];
     } catch {
-      return INITIAL_MEMBERS;
+      return [];
     }
   });
 
   const [news, setNews] = useState<NewsArticle[]>(NEWS_ARTICLES);
-  const [events, setEvents] = useState<EventItem[]>(UPCOMING_EVENTS);
-  const [disputes, setDisputes] = useState<DisputeTicket[]>(INITIAL_DISPUTES);
+  const [events] = useState<EventItem[]>(UPCOMING_EVENTS);
+  const [disputes, setDisputes] = useState<DisputeTicket[]>([]);
+  const [socialMessages, setSocialMessages] = useState<SocialMessage[]>([]);
+  const [meetings, setMeetings] = useState<OnlineMeeting[]>([]);
   
   // Firebase Authenticated User State
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -72,10 +133,13 @@ export default function App() {
     try {
       const saved = localStorage.getItem('ammon_logged_in_member');
       if (saved) {
-        const parsed = JSON.parse(saved);
+        const parsed = JSON.parse(saved) as Member;
+        if (!parsed?.id || LEGACY_TEST_MEMBER_IDS.has(parsed.id)) {
+          return null;
+        }
         return {
           ...parsed,
-          photoUrl: parsed.photoUrl ? parsed.photoUrl.replace('/src/assets/images/', '/assets/images/') : parsed.photoUrl
+          photoUrl: parsed.photoUrl ? parsed.photoUrl.replace('/src/assets/images/', '/assets/images/') : parsed.photoUrl,
         };
       }
       return null;
@@ -84,19 +148,29 @@ export default function App() {
     }
   });
 
-  // Authenticated Admin User State (Defaults to Dr. Victor O. Babatunde, Super Admin)
+  // Authenticated Admin User State (No default auto-login in production)
   const [adminUser, setAdminUser] = useState<AdminUser | null>(() => {
     try {
+      if (!getStoredExecutiveToken()) {
+        return null;
+      }
       const saved = localStorage.getItem('ammon_logged_in_admin');
-      return saved ? JSON.parse(saved) : ADMIN_USERS[0];
+      if (saved) {
+        const parsed = JSON.parse(saved) as AdminUser;
+        if (!parsed.level) {
+          return null;
+        }
+        return parsed;
+      }
+      return null;
     } catch {
-      return ADMIN_USERS[0];
+      return null;
     }
   });
 
   // Current member being viewed in modal/card
-  const [currentMember, setCurrentMember] = useState<Member>(() => {
-    return loggedInMember || members[0] || INITIAL_MEMBERS[0];
+  const [currentMember, setCurrentMember] = useState<Member | null>(() => {
+    return loggedInMember || members[0] || null;
   });
 
   // Firebase Auth State Listener
@@ -105,44 +179,70 @@ export default function App() {
       setFirebaseUser(user);
       if (user) {
         const email = user.email?.toLowerCase() || '';
-        if (email === 'millionairefidelis@gmail.com' || email === 'superadmin@ammon.ng') {
-          setAdminUser({
-            id: 'admin-super',
-            fullName: user.displayName || 'Dr. Victor O. Babatunde',
-            role: 'Super Admin',
-            title: 'National President & Registrar-General',
-            email: user.email || 'superadmin@ammon.ng',
-            phone: '+234 800 266 6661',
-            jurisdiction: 'National Headquarters (36 States + FCT)',
-            badgeNumber: 'AMMON-HQ-001',
-            avatarUrl: user.photoURL || undefined,
-          });
+        const isExecGoogle =
+          email === 'millionairefidelis@gmail.com' ||
+          email === 'superadmin@ammon.ng' ||
+          INITIAL_EXECUTIVE_ACCOUNTS.some((e) => e.email.toLowerCase() === email);
+
+        if (isExecGoogle) {
+          if (!getStoredExecutiveToken()) {
+            user
+              .getIdToken()
+              .then((idToken) => exchangeFirebaseToken(idToken))
+              .then((res) => {
+                setAdminUser(res.executive);
+              })
+              .catch(() => {
+                // Keep existing profile if offline
+              });
+          }
+          if (email === 'millionairefidelis@gmail.com' || email === 'superadmin@ammon.ng') {
+            purgeLegacyTestDocsAsAdmin().catch(() => {});
+          }
         }
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Seed & Subscribe to Firestore collections for persistence
+  // Hydrate persistent members from Express backend store + Firestore subscriptions
   useEffect(() => {
-    seedInitialFirestoreData(INITIAL_MEMBERS, NEWS_ARTICLES, INITIAL_DISPUTES);
+    fetchPublicMembers()
+      .then((res) => {
+        if (Array.isArray(res.members)) {
+          setMembers((prev) => mergeRealMembers([prev, res.members]));
+        }
+      })
+      .catch(() => {});
+
+    seedInitialFirestoreData([], NEWS_ARTICLES, [], [], []);
 
     const unsubMembers = subscribeToMembers((liveMembers) => {
-      if (liveMembers.length > 0) setMembers(liveMembers);
-    }, INITIAL_MEMBERS);
+      setMembers((prev) => mergeRealMembers([prev, liveMembers]));
+    }, []);
 
     const unsubNews = subscribeToNews((liveNews) => {
       if (liveNews.length > 0) setNews(liveNews);
     }, NEWS_ARTICLES);
 
     const unsubDisputes = subscribeToDisputes((liveDisputes) => {
-      if (liveDisputes.length > 0) setDisputes(liveDisputes);
-    }, INITIAL_DISPUTES);
+      setDisputes(liveDisputes);
+    }, []);
+
+    const unsubSocial = subscribeToSocialMessages((liveMsgs) => {
+      setSocialMessages(liveMsgs);
+    }, []);
+
+    const unsubMeetings = subscribeToMeetings((liveMeetings) => {
+      setMeetings(liveMeetings);
+    }, []);
 
     return () => {
       unsubMembers();
       unsubNews();
       unsubDisputes();
+      unsubSocial();
+      unsubMeetings();
     };
   }, []);
 
@@ -191,6 +291,8 @@ export default function App() {
   const [showAcademyModal, setShowAcademyModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
+  const [showSocialModal, setShowSocialModal] = useState(false);
+  const [socialModalTab, setSocialModalTab] = useState<SocialSpaceTab>('chat');
 
   // Selected Items for Detail Modals
   const [selectedArticle, setSelectedArticle] = useState<NewsArticle | null>(null);
@@ -202,59 +304,57 @@ export default function App() {
   const [pwaBannerVisible, setPwaBannerVisible] = useState(true);
 
   // Google Sign-In Handler
-  const handleGoogleLoginSuccess = (user: FirebaseUser) => {
+  const handleGoogleLoginSuccess = async (user: FirebaseUser) => {
     setFirebaseUser(user);
     const email = user.email?.toLowerCase() || '';
     setShowLoginModal(false);
 
-    if (email === 'millionairefidelis@gmail.com' || email === 'superadmin@ammon.ng') {
-      const superOfficer: AdminUser = {
-        id: 'admin-super',
-        fullName: user.displayName || 'Dr. Victor O. Babatunde',
-        role: 'Super Admin',
-        title: 'National President & Registrar-General',
-        email: user.email || 'superadmin@ammon.ng',
-        phone: '+234 800 266 6661',
-        jurisdiction: 'National Headquarters (36 States + FCT)',
-        badgeNumber: 'AMMON-HQ-001',
+    const execEmailMatch = INITIAL_EXECUTIVE_ACCOUNTS.some((e) => e.email.toLowerCase() === email);
+    if (email === 'millionairefidelis@gmail.com' || execEmailMatch) {
+      try {
+        const idToken = await user.getIdToken();
+        const res = await exchangeFirebaseToken(idToken);
+        setAdminUser(res.executive);
+        setShowAdminModal(true);
+        return;
+      } catch {
+        // fallback if offline
+      }
+      const fallbackExec =
+        INITIAL_EXECUTIVE_ACCOUNTS.find((e) => e.email.toLowerCase() === email) ||
+        INITIAL_EXECUTIVE_ACCOUNTS[0];
+      setAdminUser({
+        ...fallbackExec,
+        fullName: user.displayName || fallbackExec.fullName,
+        email: user.email || fallbackExec.email,
         avatarUrl: user.photoURL || undefined,
-      };
-      setAdminUser(superOfficer);
+      });
       setShowAdminModal(true);
       return;
     }
 
-    if (email === 'executive@ammon.ng') {
-      const execOfficer: AdminUser = {
-        id: 'admin-exec',
-        fullName: user.displayName || 'Alhaji Babaginda O. Sani',
-        role: 'Executive',
-        title: 'National Secretary General',
-        email: user.email || 'executive@ammon.ng',
-        phone: '+234 800 266 6662',
-        jurisdiction: 'National Executive Directorate',
-        badgeNumber: 'AMMON-EXEC-002',
-        avatarUrl: user.photoURL || undefined,
-      };
-      setAdminUser(execOfficer);
-      setShowAdminModal(true);
-      return;
-    }
-
-    // Match operator or auto-create verified Google operator
+    // Match operator or auto-create verified Google operator (free enrollment)
     const matched = members.find((m) => m.email.toLowerCase() === email);
     if (matched) {
       setLoggedInMember(matched);
       setCurrentMember(matched);
       setShowPortalModal(true);
     } else {
-      const newOperator: Member = {
+      const now = new Date();
+      const nextYear = new Date(now);
+      nextYear.setFullYear(now.getFullYear() + 1);
+      const joinedFormatted = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const expiryFormatted = nextYear.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const year = now.getFullYear();
+
+      const draftOperator: Partial<Member> & { freeEnrollment: boolean } = {
         id: `mem-${user.uid.slice(0, 8)}`,
-        membershipId: `AMMON-GOOG-${Math.floor(10000 + Math.random() * 90000)}`,
+        membershipId: `AMMON-GOOG-${year}-${Math.floor(10000 + Math.random() * 90000)}`,
         fullName: user.displayName || 'Google Verified Agent',
         businessName: `${user.displayName?.split(' ')[0] || 'Google'} Digital Terminal Services`,
         email: user.email || 'operator@gmail.com',
         phone: user.phoneNumber || '+234 800 000 0000',
+        zone: 'South West',
         state: 'Lagos',
         lga: 'Ikeja',
         category: 'POS Agents',
@@ -264,16 +364,31 @@ export default function App() {
         bvnVerified: true,
         cbnCompliant: true,
         status: 'Active',
-        joinedDate: 'Nov 11, 2025',
-        expiryDate: 'Nov 11, 2026',
+        joinedDate: joinedFormatted,
+        expiryDate: expiryFormatted,
         photoUrl: user.photoURL || undefined,
         duesPaid: true,
-        duesAmount: 15000,
+        duesAmount: 0,
+        amountPaid: 0,
+        paymentStatus: 'Paid',
+        freeEnrollment: true,
       };
-      setMembers((prev) => [newOperator, ...prev]);
-      addMemberToFirestore(newOperator);
-      setLoggedInMember(newOperator);
-      setCurrentMember(newOperator);
+
+      let savedOperator: Member = draftOperator as Member;
+      try {
+        const res = await registerMemberApi(draftOperator);
+        savedOperator = res.member;
+      } catch {
+        // Fallback to local + Firestore persistence if API unreachable
+      }
+
+      setMembers((prev) => mergeRealMembers([[savedOperator], prev]));
+      addMemberToFirestore(savedOperator);
+      setLoggedInMember(savedOperator);
+      setCurrentMember(savedOperator);
+      try {
+        localStorage.setItem('ammon_logged_in_member', JSON.stringify(savedOperator));
+      } catch {}
       setShowPortalModal(true);
     }
   };
@@ -312,6 +427,21 @@ export default function App() {
     setShowAdminModal(true);
   };
 
+  const handleSelectAdminPersona = async (admin: AdminUser) => {
+    setAdminUser(admin);
+    const demo = INITIAL_EXECUTIVE_ACCOUNTS.find((a) => a.id === admin.id);
+    if (demo) {
+      try {
+        const res = await loginExecutive(demo.email, demo.defaultPassword);
+        if (res.status === 'AUTHENTICATED') {
+          setAdminUser(res.executive);
+        }
+      } catch {
+        // ignore if server is restarting
+      }
+    }
+  };
+
   const handleLogout = () => {
     setLoggedInMember(null);
     try {
@@ -323,6 +453,7 @@ export default function App() {
 
   const handleAdminLogout = () => {
     setAdminUser(null);
+    setStoredExecutiveToken(null);
     try {
       localStorage.removeItem('ammon_logged_in_admin');
     } catch {}
@@ -330,7 +461,7 @@ export default function App() {
   };
 
   const handleRegisteredMember = (newMember: Member) => {
-    setMembers([newMember, ...members]);
+    setMembers((prev) => mergeRealMembers([[newMember], prev]));
     addMemberToFirestore(newMember);
     setLoggedInMember(newMember);
     setCurrentMember(newMember);
@@ -350,6 +481,30 @@ export default function App() {
       disputes.map((d) => (d.id === id ? { ...d, status: 'Resolved' } : d))
     );
     updateDisputeInFirestore(id, { status: 'Resolved' });
+  };
+
+  const handleSendSocialMessage = (msg: SocialMessage) => {
+    setSocialMessages((prev) => [...prev, msg]);
+    addSocialMessageToFirestore(msg);
+  };
+
+  const handleUpdateSocialMessage = (id: string, updates: Partial<SocialMessage>) => {
+    setSocialMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
+    );
+    updateSocialMessageInFirestore(id, updates);
+  };
+
+  const handleCreateMeeting = (mtg: OnlineMeeting) => {
+    setMeetings((prev) => [mtg, ...prev]);
+    addMeetingToFirestore(mtg);
+  };
+
+  const handleUpdateMeeting = (id: string, updates: Partial<OnlineMeeting>) => {
+    setMeetings((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
+    );
+    updateMeetingInFirestore(id, updates);
   };
 
   const handleOpenVerifyForId = (id: string) => {
@@ -410,14 +565,32 @@ export default function App() {
         }}
         onOpenDispute={() => setShowDisputeModal(true)}
         onOpenPortal={() => {
-          if (loggedInMember) setCurrentMember(loggedInMember);
-          setPortalSection('overview');
-          setShowPortalModal(true);
+          const targetMember = loggedInMember || currentMember;
+          if (targetMember) {
+            setCurrentMember(targetMember);
+            setPortalSection('overview');
+            setShowPortalModal(true);
+          } else {
+            handleOpenLogin('operator');
+          }
         }}
         onOpenCard={() => {
-          if (loggedInMember) setCurrentMember(loggedInMember);
-          setPortalSection('id-card');
-          setShowPortalModal(true);
+          const targetMember = loggedInMember || currentMember;
+          if (targetMember) {
+            setCurrentMember(targetMember);
+            setPortalSection('id-card');
+            setShowPortalModal(true);
+          } else {
+            handleOpenLogin('operator');
+          }
+        }}
+        onOpenSocial={() => {
+          setSocialModalTab('chat');
+          setShowSocialModal(true);
+        }}
+        onOpenMeetings={() => {
+          setSocialModalTab('meetings');
+          setShowSocialModal(true);
         }}
         loggedInMember={loggedInMember}
         adminUser={adminUser}
@@ -428,7 +601,7 @@ export default function App() {
           await logOutFirebase();
           setFirebaseUser(null);
         }}
-        onSelectAdmin={(admin) => setAdminUser(admin)}
+        onSelectAdmin={handleSelectAdminPersona}
         activeNav={activeNav}
         setActiveNav={setActiveNav}
       />
@@ -440,18 +613,23 @@ export default function App() {
         <Hero
           onOpenRegister={() => setShowRegisterModal(true)}
           onOpenLogin={() => handleOpenLogin('operator')}
+          enrolledCount={members.length}
         />
 
         {/* Quick Action Bar (6 core services with primary green badges) */}
         <QuickActionBar
           onOpenRegister={() => setShowRegisterModal(true)}
           onOpenCardModal={() => {
+            const targetMember = loggedInMember || currentMember;
             if (loggedInMember) {
               setCurrentMember(loggedInMember);
               setPortalSection('id-card');
               setShowPortalModal(true);
-            } else {
+            } else if (targetMember) {
+              setCurrentMember(targetMember);
               setShowCardModal(true);
+            } else {
+              handleOpenLogin('operator');
             }
           }}
           onOpenPaymentModal={() => {
@@ -557,39 +735,74 @@ export default function App() {
       />
 
       {/* 1. Digital Membership Card Modal */}
-      <DigitalMembershipCardModal
-        member={currentMember}
-        isOpen={showCardModal}
-        onClose={() => setShowCardModal(false)}
-        onOpenVerify={handleOpenVerifyForId}
-      />
+      {currentMember && (
+        <DigitalMembershipCardModal
+          member={currentMember}
+          isOpen={showCardModal}
+          onClose={() => setShowCardModal(false)}
+          onOpenVerify={handleOpenVerifyForId}
+        />
+      )}
 
       {/* 2. Member Portal Modal (Operator's Own Dashboard) */}
-      <MemberPortalModal
-        member={currentMember}
-        isOpen={showPortalModal}
-        onClose={() => setShowPortalModal(false)}
-        onLogout={handleLogout}
-        initialSection={portalSection}
-      />
+      {currentMember && (
+        <MemberPortalModal
+          member={currentMember}
+          members={members}
+          isOpen={showPortalModal}
+          onClose={() => setShowPortalModal(false)}
+          onLogout={handleLogout}
+          initialSection={portalSection}
+          socialMessages={socialMessages}
+          meetings={meetings}
+          onSendMessage={handleSendSocialMessage}
+          onUpdateMessage={handleUpdateSocialMessage}
+          onCreateMeeting={handleCreateMeeting}
+          onUpdateMeeting={handleUpdateMeeting}
+        />
+      )}
 
       {/* 3. Admin Executive & Super Admin Dashboard */}
-      <AdminDashboardModal
-        adminUser={adminUser || ADMIN_USERS[0]}
+      {adminUser && (
+        <AdminDashboardModal
+          adminUser={adminUser}
+          members={members}
+          news={news}
+          disputes={disputes}
+          isOpen={showAdminModal}
+          onClose={() => setShowAdminModal(false)}
+          onLogout={handleAdminLogout}
+          onSwitchAdmin={(admin) => setAdminUser(admin)}
+          onAddNews={handleAddNews}
+          onResolveDispute={handleResolveDispute}
+          onSelectMember={(m) => {
+            setCurrentMember(m);
+            setShowAdminModal(false);
+            setShowCardModal(true);
+          }}
+          socialMessages={socialMessages}
+          meetings={meetings}
+          onSendMessage={handleSendSocialMessage}
+          onUpdateMessage={handleUpdateSocialMessage}
+          onCreateMeeting={handleCreateMeeting}
+          onUpdateMeeting={handleUpdateMeeting}
+        />
+      )}
+
+      {/* 3b. Standalone Community Social Space & Online Meetings Modal */}
+      <SocialSpaceModal
+        isOpen={showSocialModal}
+        onClose={() => setShowSocialModal(false)}
+        initialTab={socialModalTab}
+        loggedInMember={loggedInMember}
+        adminUser={adminUser}
         members={members}
-        news={news}
-        disputes={disputes}
-        isOpen={showAdminModal}
-        onClose={() => setShowAdminModal(false)}
-        onLogout={handleAdminLogout}
-        onSwitchAdmin={(admin) => setAdminUser(admin)}
-        onAddNews={handleAddNews}
-        onResolveDispute={handleResolveDispute}
-        onSelectMember={(m) => {
-          setCurrentMember(m);
-          setShowAdminModal(false);
-          setShowCardModal(true);
-        }}
+        messages={socialMessages}
+        meetings={meetings}
+        onSendMessage={handleSendSocialMessage}
+        onUpdateMessage={handleUpdateSocialMessage}
+        onCreateMeeting={handleCreateMeeting}
+        onUpdateMeeting={handleUpdateMeeting}
       />
 
       {/* 4. Registration & Onboarding Modal */}
@@ -653,6 +866,13 @@ export default function App() {
       <PaystackDuesModal
         isOpen={showPaymentModal}
         onClose={() => setShowPaymentModal(false)}
+        onPaymentVerified={(updatedMember) => {
+          setMembers((prev) =>
+            prev.some((m) => m.id === updatedMember.id)
+              ? prev.map((m) => (m.id === updatedMember.id ? updatedMember : m))
+              : [updatedMember, ...prev]
+          );
+        }}
       />
 
       {/* 12. About AMMON Institutional Charter Modal */}
@@ -686,7 +906,7 @@ export default function App() {
                 The Unified Voice of Nigeria&apos;s Agent Banking Ecosystem
               </h4>
               <p className="text-gray-700">
-                Founded to protect, organize, and elevate over 140,000 POS agents, super agents, and mobile money operators, 
+                Founded to protect, organize, and elevate POS agents, super agents, and mobile money operators, 
                 AMMON serves as the critical bridge connecting financial regulators (Central Bank of Nigeria, NIBSS) 
                 with retail operators in urban markets, rural communities, and interstate commerce hubs.
               </p>

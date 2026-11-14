@@ -1,69 +1,255 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // Global Catch-All: Default Deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // Core Primitives
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
     }
 
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
     }
 
-    function isAdmin() {
-      return isSignedIn() && (
+    function isBootstrappedSuperAdmin() {
+      return isVerifiedUser() && (
         request.auth.token.email == 'millionairefidelis@gmail.com' ||
-        request.auth.token.email == 'superadmin@ammon.ng' ||
-        request.auth.token.email == 'executive@ammon.ng' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        request.auth.token.email == 'superadmin@ammon.ng'
       );
     }
 
-    // Members / Operator Registry
-    // Read: Public (so anyone or law enforcement can verify agent ID & status)
-    // Write: Authenticated members or administrators
+    function hasExecProfile() {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/executives/$(request.auth.uid));
+    }
+
+    function getExecProfile() {
+      return get(/databases/$(database)/documents/executives/$(request.auth.uid)).data;
+    }
+
+    function isActiveExecutive() {
+      return isBootstrappedSuperAdmin()
+        || (hasExecProfile() && getExecProfile().activationStatus == 'Active');
+    }
+
+    function isSuperAdmin() {
+      return isBootstrappedSuperAdmin()
+        || (isActiveExecutive() && getExecProfile().level == 'super_admin');
+    }
+
+    function isAdmin() {
+      return isSuperAdmin()
+        || (isVerifiedUser() && request.auth.token.email == 'executive@ammon.ng')
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Strict Jurisdiction Verification Helper against a record's geography
+    function execHasJurisdiction(record) {
+      return hasExecProfile()
+        && getExecProfile().activationStatus == 'Active'
+        && (
+          getExecProfile().level == 'super_admin' ||
+          getExecProfile().level == 'national' ||
+          (getExecProfile().level == 'specialized' && getExecProfile().permissions.crossZoneAuthorized == true) ||
+          (getExecProfile().level == 'zonal' && record.zone == getExecProfile().assignedZone) ||
+          (getExecProfile().level == 'state' && record.state == getExecProfile().assignedState) ||
+          (getExecProfile().level == 'lga' && record.state == getExecProfile().assignedState && record.lga == getExecProfile().assignedLga) ||
+          (getExecProfile().level == 'ward' && record.state == getExecProfile().assignedState && record.lga == getExecProfile().assignedLga && record.ward == getExecProfile().assignedWard) ||
+          (getExecProfile().level == 'community' && record.state == getExecProfile().assignedState && record.lga == getExecProfile().assignedLga && record.ward == getExecProfile().assignedWard && record.community == getExecProfile().assignedCommunity)
+        );
+    }
+
+    function hasJurisdictionAccess(record) {
+      return isSuperAdmin() || execHasJurisdiction(record);
+    }
+
+    // Entity Validators
+    function isValidExecutiveAccount(data) {
+      return data.keys().hasAll(['id', 'fullName', 'email', 'role', 'level', 'badgeNumber', 'activationStatus'])
+        && data.id is string && data.id.size() <= 128
+        && data.fullName is string && data.fullName.size() <= 128
+        && data.email is string && data.email.size() <= 128
+        && data.role in ['Super Admin', 'Executive']
+        && data.level in ['super_admin', 'national', 'zonal', 'state', 'lga', 'ward', 'community', 'specialized']
+        && data.badgeNumber is string && data.badgeNumber.size() <= 64
+        && data.activationStatus in ['Active', 'Invited - Password Setup Required', 'Suspended'];
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['id', 'title', 'reportType', 'summary', 'submittedById', 'submittedByLevel', 'zone', 'state', 'routedToLevel', 'reviewStatus', 'createdAtMs'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 256
+        && data.summary is string && data.summary.size() <= 4096
+        && data.submittedByLevel in ['super_admin', 'national', 'zonal', 'state', 'lga', 'ward', 'community', 'specialized']
+        && data.routedToLevel in ['super_admin', 'national', 'zonal', 'state', 'lga', 'ward', 'community', 'specialized']
+        && data.reviewStatus in ['Submitted', 'Under Review', 'Reviewed & Noted', 'Escalated to Next Level', 'Approved']
+        && data.createdAtMs is number;
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['id', 'title', 'body', 'type', 'senderId', 'senderLevel', 'targetLevel', 'createdAtMs'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 256
+        && data.body is string && data.body.size() <= 4096
+        && data.type in ['Announcement', 'Notice', 'Meeting Invitation', 'Compliance Directive']
+        && data.createdAtMs is number;
+    }
+
+    function isValidFinancialAdjustment(data) {
+      return data.keys().hasAll(['id', 'memberId', 'membershipId', 'reason', 'approvedById', 'auditRef', 'createdAtMs'])
+        && data.id is string && data.id.size() <= 128
+        && data.reason is string && data.reason.size() >= 10 && data.reason.size() <= 1024
+        && data.auditRef is string && data.auditRef.size() <= 64
+        && data.createdAtMs is number;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'actorId', 'actorName', 'action', 'affectedRecordId', 'details', 'createdAtMs'])
+        && data.id is string && data.id.size() <= 128
+        && data.actorId is string && data.actorId.size() <= 128
+        && data.action is string && data.action.size() <= 64
+        && data.details is string && data.details.size() <= 2048
+        && data.createdAtMs is number;
+    }
+
+    // 1. Members / Centralized Operator Registry
+    // Public verification lookup allowed for QR / ID credential check, while executive writes require jurisdiction clearance
     match /members/{memberId} {
       allow get, list: if true;
-      allow create: if true; // Allows self-onboarding from kiosk registration
-      allow update: if isSignedIn() || true;
-      allow delete: if isAdmin();
+      allow create: if isValidId(memberId)
+        && incoming().membershipId is string
+        && incoming().fullName is string
+        && incoming().state is string;
+      allow update: if isValidId(memberId) && (
+        isSuperAdmin() ||
+        (isActiveExecutive() && hasJurisdictionAccess(existing()) && !incoming().diff(existing()).affectedKeys().hasAny(['paystackVerified', 'paystackReference']))
+      );
+      allow delete: if isSuperAdmin();
     }
 
-    // Regulatory Circulars & Gazette News
-    // Read: Public (gazettes are open regulatory notices)
-    // Create/Update/Delete: Authenticated / Admin
+    // 2. Hierarchical Executive Accounts
+    match /executives/{execId} {
+      allow get: if isValidId(execId) && (
+        isSuperAdmin() ||
+        (isVerifiedUser() && request.auth.uid == execId) ||
+        (isActiveExecutive() && hasJurisdictionAccess(resource.data))
+      );
+      allow list: if isSuperAdmin() || isActiveExecutive();
+      allow create: if isValidId(execId) && isSuperAdmin() && isValidExecutiveAccount(incoming());
+      allow update: if isValidId(execId) && isSuperAdmin() && isValidExecutiveAccount(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    // 3. Executive Activity Reports (Jurisdiction & Chain-of-Command Scoped)
+    match /executive_reports/{reportId} {
+      allow get: if isValidId(reportId) && isActiveExecutive() && (
+        hasJurisdictionAccess(existing()) || existing().submittedById == request.auth.uid
+      );
+      allow list: if isActiveExecutive();
+      allow create: if isValidId(reportId) && isActiveExecutive() && isValidReport(incoming()) && hasJurisdictionAccess(incoming());
+      allow update: if isValidId(reportId) && isActiveExecutive() && isValidReport(incoming())
+        && incoming().submittedById == existing().submittedById
+        && hasJurisdictionAccess(existing())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['reviewStatus', 'routedToLevel', 'administrativeComments']);
+      allow delete: if false;
+    }
+
+    // 4. Targeted Executive Announcements
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId) && isActiveExecutive();
+      allow list: if isActiveExecutive();
+      allow create: if isValidId(announcementId) && isActiveExecutive() && isValidAnnouncement(incoming());
+      allow update: if isValidId(announcementId) && isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // 5. Financial Adjustments (Requires Approver + Reason, No Direct Falsification)
+    match /financial_adjustments/{adjustmentId} {
+      allow get, list: if isActiveExecutive() && (isSuperAdmin() || getExecProfile().permissions.canAdjustPayments == true);
+      allow create: if isValidId(adjustmentId)
+        && isActiveExecutive()
+        && (isSuperAdmin() || getExecProfile().permissions.canAdjustPayments == true)
+        && isValidFinancialAdjustment(incoming())
+        && hasJurisdictionAccess(incoming());
+      allow update, delete: if false;
+    }
+
+    // 6. Immutable Audit Logs (Append-Only; Updates & Deletes Strictly Forbidden)
+    match /audit_logs/{logId} {
+      allow get, list: if isActiveExecutive() && (isSuperAdmin() || getExecProfile().permissions.canViewAuditLogs == true);
+      allow create: if isValidId(logId) && isActiveExecutive() && isValidAuditLog(incoming());
+      allow update, delete: if false;
+    }
+
+    // 7. Configurable Hierarchy & Zones (Super Admin Only Writes)
+    match /hierarchy_config/{configId} {
+      allow get, list: if true;
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // 8. Regulatory Circulars & Gazette News
     match /news/{newsId} {
       allow get, list: if true;
-      allow create, update: if isSignedIn() || true;
+      allow create, update: if isValidId(newsId) && (isSuperAdmin() || isActiveExecutive() || isSignedIn());
       allow delete: if isAdmin();
     }
 
-    // Dispute Tickets / Complaints
-    // Create: Public (agents in distress or facing illegal LGA harassment can lodge reports)
-    // Read: Authenticated officers or the reporting agent
+    // 9. Dispute Tickets / Complaints
     match /disputes/{disputeId} {
-      allow create: if true;
+      allow create: if isValidId(disputeId);
       allow get, list: if true;
-      allow update: if isSignedIn() || true;
+      allow update: if isValidId(disputeId) && (isSuperAdmin() || isActiveExecutive() || isSignedIn());
       allow delete: if isAdmin();
     }
 
-    // User Profiles
+    // 10. User Profiles
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      allow create, update: if isOwner(userId);
+      allow create: if isOwner(userId) && (!('role' in incoming()) || incoming().role in ['Member', 'Operator']);
+      allow update: if isOwner(userId) && !incoming().diff(existing()).affectedKeys().hasAny(['role']);
       allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // 11. AMMON Community Social Space Messages
+    match /social_messages/{messageId} {
+      allow get, list: if true;
+      allow create: if isValidId(messageId)
+        && incoming().channelId is string
+        && incoming().senderName is string
+        && incoming().senderName.size() <= 128
+        && incoming().text is string
+        && incoming().text.size() <= 4096;
+      allow update: if isValidId(messageId);
+      allow delete: if isAdmin();
+    }
+
+    // 12. AMMON Online Meetings & Townhalls
+    match /meetings/{meetingId} {
+      allow get, list: if true;
+      allow create: if isValidId(meetingId)
+        && incoming().title is string
+        && incoming().title.size() <= 256
+        && incoming().hostName is string;
+      allow update: if isValidId(meetingId);
+      allow delete: if isAdmin();
     }
   }
 }

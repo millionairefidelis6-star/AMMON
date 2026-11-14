@@ -1,95 +1,7 @@
-import { Member, NewsArticle, EventItem, DisputeTicket } from '../types';
+import type { Member, NewsArticle, EventItem, DisputeTicket, SocialChannel, SocialMessage, OnlineMeeting } from '../types/index.ts';
+import { EXPANDED_INITIAL_MEMBERS, INITIAL_EXECUTIVE_ACCOUNTS } from './hierarchyData.ts';
 
-export const INITIAL_MEMBERS: Member[] = [
-  {
-    id: 'mem-1',
-    membershipId: 'AMMON-LAG-2025-08492',
-    fullName: 'Chinedu Kolawole Eze',
-    businessName: 'Kolawole Ventures & POS Terminal Hub',
-    email: 'kolawole.pos@gmail.com',
-    phone: '+234 803 456 7890',
-    state: 'Lagos',
-    lga: 'Ikeja',
-    category: 'POS Agents',
-    tier: 'Tier 2 Certified Agent',
-    terminalSerialNumber: 'MP-NG-992014',
-    terminalProvider: 'Moniepoint / OPay',
-    bvnVerified: true,
-    cbnCompliant: true,
-    status: 'Active',
-    joinedDate: '15 Jan 2023',
-    expiryDate: '31 Dec 2026',
-    photoUrl: '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
-    duesPaid: true,
-    duesAmount: 15000,
-  },
-  {
-    id: 'mem-2',
-    membershipId: 'AMMON-ABJ-2025-01042',
-    fullName: 'Amina Fatima Bello',
-    businessName: 'Bello Digital Pay Services',
-    email: 'amina.bello@digitalpay.ng',
-    phone: '+234 812 345 6789',
-    state: 'FCT Abuja',
-    lga: 'Municipal (AMAC)',
-    category: 'Super Agents',
-    tier: 'Tier 3 Master Aggregator',
-    terminalSerialNumber: 'OP-ABJ-44318',
-    terminalProvider: 'OPay & PalmPay',
-    bvnVerified: true,
-    cbnCompliant: true,
-    status: 'Active',
-    joinedDate: '03 Feb 2024',
-    expiryDate: '31 Dec 2026',
-    photoUrl: '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
-    duesPaid: true,
-    duesAmount: 50000,
-  },
-  {
-    id: 'mem-3',
-    membershipId: 'AMMON-KAN-2025-03120',
-    fullName: 'Ibrahim Sanusi Musa',
-    businessName: 'Kano Express Agent Banking',
-    email: 'sanusi.kano@gmail.com',
-    phone: '+234 802 987 6543',
-    state: 'Kano',
-    lga: 'Nassarawa',
-    category: 'POS Agents',
-    tier: 'Tier 1 Standard Agent',
-    terminalSerialNumber: 'PP-KAN-11849',
-    terminalProvider: 'PalmPay',
-    bvnVerified: true,
-    cbnCompliant: true,
-    status: 'Active',
-    joinedDate: '12 Apr 2024',
-    expiryDate: '31 Dec 2026',
-    photoUrl: '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
-    duesPaid: true,
-    duesAmount: 15000,
-  },
-  {
-    id: 'mem-4',
-    membershipId: 'AMMON-RIV-2025-05519',
-    fullName: 'Blessing Tariere Jumbo',
-    businessName: 'Port Harcourt QuickCash Hub',
-    email: 'blessing.jumbo@phcquickcash.ng',
-    phone: '+234 809 112 2334',
-    state: 'Rivers',
-    lga: 'Port Harcourt City',
-    category: 'POS Agents',
-    tier: 'Tier 2 Certified Agent',
-    terminalSerialNumber: 'NX-PHC-87723',
-    terminalProvider: 'Nomba / Kuda',
-    bvnVerified: true,
-    cbnCompliant: true,
-    status: 'Active',
-    joinedDate: '18 Nov 2023',
-    expiryDate: '31 Dec 2026',
-    photoUrl: '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
-    duesPaid: true,
-    duesAmount: 15000,
-  }
-];
+export const INITIAL_MEMBERS: Member[] = EXPANDED_INITIAL_MEMBERS;
 
 export const NEWS_ARTICLES: NewsArticle[] = [
   {
@@ -233,7 +145,7 @@ export const MEMBERSHIP_CATEGORIES_DATA = [
     description: 'Licensed Mobile Money Operators (MMOs), Switching Companies, Payment Service Banks (PSBs), and Payment Solution Service Providers (PSSPs).',
     annualDues: '₦250,000 / year',
     benefits: [
-      'Direct strategic alignment with 140,000+ grassroot operators',
+      'Direct strategic alignment with grassroots POS operators nationwide',
       'Joint regulatory advocacy on cash availability and interchange tariffs',
       'Co-branded nationwide fraud awareness campaigns',
       'Annual AMMON National Conference sponsorship headline slot',
@@ -284,34 +196,7 @@ export const MEMBERSHIP_CATEGORIES_DATA = [
   }
 ];
 
-export const INITIAL_DISPUTES: DisputeTicket[] = [
-  {
-    id: 'disp-1',
-    ticketNumber: 'AMMON-DISP-2025-0012',
-    agentId: 'AMMON-LAG-2025-08492',
-    agentName: 'Chinedu Kolawole Eze',
-    businessName: 'Kolawole Ventures POS',
-    phone: '+234 803 456 7890',
-    issueType: 'Illegal LGA Levy',
-    state: 'Lagos',
-    status: 'Under Investigation',
-    dateReported: 'Nov 09, 2025',
-    description: 'Local council revenue agents in Ikeja demanding ₦2,000 daily commercial permit fee despite Federal High Court ruling exempting agent kiosks.',
-  },
-  {
-    id: 'disp-2',
-    ticketNumber: 'AMMON-DISP-2025-0008',
-    agentId: 'AMMON-ABJ-2025-01042',
-    agentName: 'Amina Fatima Bello',
-    businessName: 'Bello Digital Pay',
-    phone: '+234 812 345 6789',
-    issueType: 'Frozen Terminal Wallet',
-    state: 'FCT Abuja',
-    status: 'Resolved',
-    dateReported: 'Nov 04, 2025',
-    description: 'Partner aggregator locked wallet due to automated false-positive fraud trigger on ₦850,000 legitimate corporate payroll cash-out. Unfrozen within 24h via AMMON escalation.',
-  }
-];
+export const INITIAL_DISPUTES: DisputeTicket[] = [];
 
 export const NIGERIAN_STATES = [
   'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
@@ -321,32 +206,11 @@ export const NIGERIAN_STATES = [
   'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara'
 ];
 
-export const ADMIN_USERS = [
-  {
-    id: 'admin-super',
-    fullName: 'Dr. Victor O. Babatunde',
-    role: 'Super Admin' as const,
-    title: 'National President & Registrar-General',
-    email: 'superadmin@ammon.ng',
-    phone: '+234 800 266 6661',
-    password: 'admin2025',
-    jurisdiction: 'National Headquarters (36 States + FCT)',
-    badgeNumber: 'AMMON-HQ-001',
-    avatarUrl: '/assets/images/ammon_stakeholders_forum_1794380623181.jpg',
-  },
-  {
-    id: 'admin-exec',
-    fullName: 'Alhaji Babaginda O. Sani',
-    role: 'Executive' as const,
-    title: 'National Secretary General',
-    email: 'executive@ammon.ng',
-    phone: '+234 800 266 6662',
-    password: 'exec2025',
-    jurisdiction: 'National Executive Directorate',
-    badgeNumber: 'AMMON-EXEC-002',
-    avatarUrl: '/assets/images/ammon_stakeholders_forum_1794380623181.jpg',
-  }
-];
+export const ADMIN_USERS = INITIAL_EXECUTIVE_ACCOUNTS.map((exec) => ({
+  ...exec,
+  password: exec.defaultPassword,
+  avatarUrl: '/assets/images/ammon_stakeholders_forum_1794380623181.jpg',
+}));
 
 export const TEST_ADMIN_CREDENTIALS = [
   {
@@ -366,4 +230,41 @@ export const TEST_ADMIN_CREDENTIALS = [
     description: 'Registry governance, circular publishing & legal aid arbitration',
   }
 ];
+
+export const SOCIAL_CHANNELS: SocialChannel[] = [
+  {
+    id: 'national-hub',
+    name: 'National Operators Hub',
+    description: 'Official AMMON nationwide POS & mobile money community',
+    badge: '36 States',
+    category: 'National' as const,
+  },
+  {
+    id: 'lagos-chapter',
+    name: 'Lagos State Chapter',
+    description: 'Ikeja, Lekki, Island & Mainland agent coordination',
+    badge: 'Lagos',
+    category: 'State Chapter' as const,
+  },
+  {
+    id: 'cbn-regulatory',
+    name: 'CBN & NIBSS Circulars',
+    description: 'Live regulatory updates, tariffs & compliance Q&A',
+    badge: 'Official',
+    category: 'Regulatory' as const,
+  },
+  {
+    id: 'fraud-watch',
+    name: 'Anti-Fraud & Legal Watch',
+    description: 'Report fake alerts, LGA harassment & wallet holds',
+    badge: '24/7 Desk',
+    category: 'Support' as const,
+  },
+];
+
+export const INITIAL_SOCIAL_MESSAGES: SocialMessage[] = [];
+
+export const INITIAL_MEETINGS: OnlineMeeting[] = [];
+
+
 

@@ -2,7 +2,7 @@
   "entities": {
     "member": {
       "title": "AMMON Registered Member",
-      "description": "Registered POS Agent, Super Agent, or Fintech operator in AMMON national registry",
+      "description": "Registered POS Agent, Super Agent, or Fintech operator in AMMON centralized national registry",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
@@ -11,8 +11,11 @@
         "businessName": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 128 },
         "phone": { "type": "string", "maxLength": 32 },
+        "zone": { "type": "string", "maxLength": 64 },
         "state": { "type": "string", "maxLength": 64 },
         "lga": { "type": "string", "maxLength": 64 },
+        "ward": { "type": "string", "maxLength": 64 },
+        "community": { "type": "string", "maxLength": 64 },
         "category": { "type": "string", "maxLength": 64 },
         "tier": { "type": "string", "maxLength": 32 },
         "terminalSerialNumber": { "type": "string", "maxLength": 64 },
@@ -22,12 +25,146 @@
         "status": { "type": "string", "enum": ["Active", "Pending Verification", "Expired", "Suspended"] },
         "joinedDate": { "type": "string", "maxLength": 32 },
         "expiryDate": { "type": "string", "maxLength": 32 },
-        "photoUrl": { "type": "string", "maxLength": 1024 },
+        "photoUrl": { "type": "string", "maxLength": 2048 },
+        "passportStoragePath": { "type": "string", "maxLength": 512 },
+        "kycDocumentType": { "type": "string", "enum": ["Government ID", "Business License"] },
+        "kycDocumentUrl": { "type": "string", "maxLength": 2048 },
+        "kycDocumentStoragePath": { "type": "string", "maxLength": 512 },
         "duesPaid": { "type": "boolean" },
         "duesAmount": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Unpaid", "Partially Paid", "Payment Pending", "Expired", "Payment Verification Required"] },
+        "paystackReference": { "type": "string", "maxLength": 128 },
+        "paystackVerified": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["membershipId", "fullName", "businessName", "phone", "state", "status"]
+    },
+    "executive_account": {
+      "title": "AMMON Hierarchical Executive Account",
+      "description": "Individual executive officer account with administrative level, assigned geographical jurisdiction, and permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 128 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "role": { "type": "string", "enum": ["Super Admin", "Executive"] },
+        "level": { "type": "string", "enum": ["super_admin", "national", "zonal", "state", "lga", "ward", "community", "specialized"] },
+        "position": { "type": "string", "maxLength": 128 },
+        "badgeNumber": { "type": "string", "maxLength": 64 },
+        "assignedZone": { "type": "string", "maxLength": 64 },
+        "assignedState": { "type": "string", "maxLength": 64 },
+        "assignedLga": { "type": "string", "maxLength": 64 },
+        "assignedWard": { "type": "string", "maxLength": 64 },
+        "assignedCommunity": { "type": "string", "maxLength": 64 },
+        "jurisdiction": { "type": "string", "maxLength": 256 },
+        "activationStatus": { "type": "string", "enum": ["Active", "Invited - Password Setup Required", "Suspended"] },
+        "requiresPasswordSetup": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "fullName", "email", "role", "level", "badgeNumber", "activationStatus"]
+    },
+    "executive_report": {
+      "title": "Executive Activity & Compliance Report",
+      "description": "Activity report submitted by an executive and automatically routed to the next administrative level",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "reportType": { "type": "string", "maxLength": 64 },
+        "summary": { "type": "string", "maxLength": 4096 },
+        "submittedById": { "type": "string", "maxLength": 128 },
+        "submittedByName": { "type": "string", "maxLength": 128 },
+        "submittedByLevel": { "type": "string", "maxLength": 32 },
+        "zone": { "type": "string", "maxLength": 64 },
+        "state": { "type": "string", "maxLength": 64 },
+        "lga": { "type": "string", "maxLength": 64 },
+        "ward": { "type": "string", "maxLength": 64 },
+        "community": { "type": "string", "maxLength": 64 },
+        "routedToLevel": { "type": "string", "maxLength": 32 },
+        "reviewStatus": { "type": "string", "enum": ["Submitted", "Under Review", "Reviewed & Noted", "Escalated to Next Level", "Approved"] },
+        "submittedAt": { "type": "string", "maxLength": 64 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["id", "title", "reportType", "summary", "submittedById", "submittedByLevel", "zone", "state", "routedToLevel", "reviewStatus", "createdAtMs"]
+    },
+    "executive_announcement": {
+      "title": "Targeted Jurisdiction Announcement",
+      "description": "Communication, notice, directive, or meeting invitation targeted to an authorized jurisdiction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "body": { "type": "string", "maxLength": 4096 },
+        "type": { "type": "string", "enum": ["Announcement", "Notice", "Meeting Invitation", "Compliance Directive"] },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 128 },
+        "senderLevel": { "type": "string", "maxLength": 32 },
+        "targetLevel": { "type": "string", "maxLength": 32 },
+        "targetZone": { "type": "string", "maxLength": 64 },
+        "targetState": { "type": "string", "maxLength": 64 },
+        "targetLga": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["id", "title", "body", "type", "senderId", "senderLevel", "targetLevel", "createdAtMs"]
+    },
+    "financial_adjustment": {
+      "title": "Authorized Financial Payment Adjustment",
+      "description": "Audited manual financial adjustment requiring documented reason and authorized approver",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "memberId": { "type": "string", "maxLength": 128 },
+        "membershipId": { "type": "string", "maxLength": 64 },
+        "memberName": { "type": "string", "maxLength": 128 },
+        "zone": { "type": "string", "maxLength": 64 },
+        "state": { "type": "string", "maxLength": 64 },
+        "lga": { "type": "string", "maxLength": 64 },
+        "previousStatus": { "type": "string", "maxLength": 64 },
+        "newStatus": { "type": "string", "maxLength": 64 },
+        "previousAmountPaid": { "type": "number" },
+        "newAmountPaid": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 1024 },
+        "approvedById": { "type": "string", "maxLength": 128 },
+        "approvedByName": { "type": "string", "maxLength": 128 },
+        "auditRef": { "type": "string", "maxLength": 64 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["id", "memberId", "membershipId", "reason", "approvedById", "auditRef", "createdAtMs"]
+    },
+    "audit_log": {
+      "title": "Immutable Executive Audit Log Entry",
+      "description": "Append-only immutable audit trail of logins, access attempts, approvals, financial changes, and account actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "actorId": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 128 },
+        "actorRole": { "type": "string", "maxLength": 64 },
+        "actorLevel": { "type": "string", "maxLength": 32 },
+        "actorJurisdiction": { "type": "string", "maxLength": 256 },
+        "action": { "type": "string", "maxLength": 64 },
+        "affectedRecordId": { "type": "string", "maxLength": 128 },
+        "affectedRecordLabel": { "type": "string", "maxLength": 256 },
+        "details": { "type": "string", "maxLength": 2048 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["id", "actorId", "actorName", "action", "affectedRecordId", "details", "createdAtMs"]
+    },
+    "hierarchy_config": {
+      "title": "AMMON Configurable Administrative Hierarchy",
+      "description": "Super Admin configuration for zones, states, LGAs, wards, communities, and specialized roles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "allowPartialPayments": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id"]
     },
     "news_article": {
       "title": "Regulatory Circular & Gazette Notice",
@@ -63,7 +200,9 @@
         "businessName": { "type": "string", "maxLength": 128 },
         "phone": { "type": "string", "maxLength": 32 },
         "issueType": { "type": "string", "maxLength": 64 },
+        "zone": { "type": "string", "maxLength": 64 },
         "state": { "type": "string", "maxLength": 64 },
+        "lga": { "type": "string", "maxLength": 64 },
         "status": { "type": "string", "enum": ["Open", "Under Investigation", "Resolved"] },
         "dateReported": { "type": "string", "maxLength": 32 },
         "description": { "type": "string", "maxLength": 4096 },
@@ -85,12 +224,76 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email"]
+    },
+    "social_message": {
+      "title": "Community Social Space Message",
+      "description": "WhatsApp-style channel message with @mentions, device uploads, likes, and emoji reactions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "channelId": { "type": "string", "maxLength": 64 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 128 },
+        "senderRole": { "type": "string", "maxLength": 64 },
+        "text": { "type": "string", "maxLength": 4096 },
+        "attachmentName": { "type": "string", "maxLength": 256 },
+        "attachmentType": { "type": "string", "maxLength": 128 },
+        "attachmentSize": { "type": "string", "maxLength": 64 },
+        "attachmentData": { "type": "string", "maxLength": 850000 },
+        "timestampLabel": { "type": "string", "maxLength": 32 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["id", "channelId", "senderId", "senderName", "senderRole", "text", "createdAtMs"]
+    },
+    "online_meeting": {
+      "title": "AMMON Online Meeting Room",
+      "description": "Scheduled or live online video/audio briefing room for operators and executives",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "hostName": { "type": "string", "maxLength": 128 },
+        "hostRole": { "type": "string", "maxLength": 64 },
+        "hostId": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "maxLength": 64 },
+        "scheduledDate": { "type": "string", "maxLength": 32 },
+        "scheduledTime": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["Live", "Scheduled", "Ended"] },
+        "agenda": { "type": "string", "maxLength": 2048 },
+        "meetingCode": { "type": "string", "maxLength": 64 },
+        "createdAtMs": { "type": "number" }
+      },
+      "required": ["id", "title", "hostName", "status", "meetingCode", "createdAtMs"]
     }
   },
   "firestore": {
     "/members/{memberId}": {
       "schema": { "$ref": "member" },
-      "description": "AMMON National Certified Operator Registry"
+      "description": "AMMON National Centralized Operator Registry"
+    },
+    "/executives/{execId}": {
+      "schema": { "$ref": "executive_account" },
+      "description": "Multi-level Executive Officers & Jurisdiction Assignments"
+    },
+    "/executive_reports/{reportId}": {
+      "schema": { "$ref": "executive_report" },
+      "description": "Hierarchical Executive Activity & Compliance Reports"
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "executive_announcement" },
+      "description": "Jurisdiction-Targeted Executive Communications"
+    },
+    "/financial_adjustments/{adjustmentId}": {
+      "schema": { "$ref": "financial_adjustment" },
+      "description": "Audited Payment Adjustments & Authorizations"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "audit_log" },
+      "description": "Immutable Accountability Audit Trail"
+    },
+    "/hierarchy_config/{configId}": {
+      "schema": { "$ref": "hierarchy_config" },
+      "description": "Configurable Nigerian Geopolitical Zones, States, LGAs, Wards & Communities"
     },
     "/news/{newsId}": {
       "schema": { "$ref": "news_article" },
@@ -103,6 +306,14 @@
     "/users/{userId}": {
       "schema": { "$ref": "user_profile" },
       "description": "User Account Profiles and Role Verification"
+    },
+    "/social_messages/{messageId}": {
+      "schema": { "$ref": "social_message" },
+      "description": "AMMON WhatsApp-style Community Messages, Attachments, Tags & Reactions"
+    },
+    "/meetings/{meetingId}": {
+      "schema": { "$ref": "online_meeting" },
+      "description": "AMMON Online Meetings & Townhalls"
     }
   }
 }

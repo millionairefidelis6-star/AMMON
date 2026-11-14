@@ -4,9 +4,10 @@ import { ArrowRight, User, ChevronLeft, ChevronRight, CheckCircle2, Shield, Awar
 interface HeroProps {
   onOpenRegister: () => void;
   onOpenLogin: () => void;
+  enrolledCount: number;
 }
 
-export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
+export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin, enrolledCount }) => {
   const [currentSlide, setCurrentSlide] = useState(0);
 
   const slides = [
@@ -15,7 +16,7 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
       badge: 'Together for a Digital Nigeria',
       image: '/assets/images/ammon_hero_pos_agent_1794380620175.jpg',
       alt: 'Nigerian female POS agent wearing AMMON green uniform with POS terminal',
-      caption: 'Over 140,000 operators certified nationwide'
+      caption: 'Official national digital accreditation for POS & Mobile Money operators'
     },
     {
       id: 2,
@@ -95,7 +96,9 @@ export const Hero: React.FC<HeroProps> = ({ onOpenRegister, onOpenLogin }) => {
             <div className="pt-4 border-t border-[#E5E7EB] flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-[#252525]/70">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-[#176B37] shrink-0" />
-                <span className="font-medium">148,000+ Registered POS Agents</span>
+                <span className="font-semibold text-[#14532D] tabular-nums">
+                  {enrolledCount.toLocaleString()} Enrolled {enrolledCount === 1 ? 'Member' : 'Members'}
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <Shield className="w-4 h-4 text-[#176B37] shrink-0" />

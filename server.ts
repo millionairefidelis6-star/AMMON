@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createServer as createViteServer } from 'vite';
+import { WebSocketServer, WebSocket } from 'ws';
 const firebaseConfig = JSON.parse(
   fs.readFileSync(path.resolve(process.cwd(), 'firebase-applet-config.json'), 'utf8')
 ) as { projectId: string; appId: string; apiKey: string };
@@ -1539,9 +1541,51 @@ async function createAppServer() {
   });
 
   // =========================================================================
-  // 8. KYC DOCUMENT & PASSPORT UPLOAD VAULT (Resilient Fallback for Storage)
+  // 8. KYC DOCUMENT, PASSPORT & CHAT VIDEO/MEDIA UPLOAD VAULT
   // =========================================================================
   const uploadsRoot = path.resolve(process.cwd(), '.ammon-data', 'uploads');
+
+  const MIME_BY_EXT: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.mp4': 'video/mp4',
+    '.m4v': 'video/x-m4v',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime',
+    '.ogv': 'video/ogg',
+    '.3gp': 'video/3gpp',
+    '.mkv': 'video/x-matroska',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain; charset=utf-8',
+    '.csv': 'text/csv; charset=utf-8',
+  };
+
+  const EXT_BY_MIME: Record<string, string> = {
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/quicktime': 'mov',
+    'video/x-m4v': 'm4v',
+    'video/ogg': 'ogv',
+    'video/3gpp': '3gp',
+    'video/x-matroska': 'mkv',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/wav': 'wav',
+    'audio/ogg': 'ogg',
+    'audio/mp4': 'm4a',
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'application/pdf': 'pdf',
+  };
 
   app.post('/api/uploads/kyc', (req, res) => {
     try {
@@ -1584,10 +1628,162 @@ async function createAppServer() {
     }
   });
 
+  // Raw binary upload for Social Space videos, voice/audio notes, photos & documents (up to 25 MB)
+  app.post(
+    '/api/uploads/chat-media',
+    express.raw({ type: '*/*', limit: '26mb' }),
+    (req, res) => {
+      try {
+        const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+        if (!buffer.length || buffer.length > 25 * 1024 * 1024) {
+          res.status(400).json({ error: 'Uploaded file is empty or exceeds the 25 MB limit.' });
+          return;
+        }
+
+        const rawName = String(req.headers['x-file-name'] || req.query.fileName || 'media.bin');
+        const mimeType = String(
+          req.headers['x-mime-type'] || req.query.mimeType || 'application/octet-stream'
+        )
+          .toLowerCase()
+          .split(';')[0]
+          .trim();
+
+        const origExtMatch = rawName.match(/\.([a-zA-Z0-9]{1,6})$/);
+        const origExt = origExtMatch ? origExtMatch[1].toLowerCase() : '';
+        const ext = origExt || EXT_BY_MIME[mimeType] || 'bin';
+        const baseSafe = rawName
+          .replace(/\.[a-zA-Z0-9]+$/, '')
+          .replace(/[^a-zA-Z0-9_-]/g, '_')
+          .slice(0, 48) || 'chat_media';
+
+        const storedName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${baseSafe}.${ext}`;
+        const targetDir = path.join(uploadsRoot, 'chat-media');
+        fs.mkdirSync(targetDir, { recursive: true });
+        fs.writeFileSync(path.join(targetDir, storedName), buffer);
+
+        const resolvedMime = MIME_BY_EXT[`.${ext}`] || mimeType || 'application/octet-stream';
+
+        res.status(201).json({
+          url: `/api/uploads/chat-media/${storedName}`,
+          storagePath: `chat-media/${storedName}`,
+          contentType: resolvedMime,
+          size: buffer.length,
+        });
+      } catch (err) {
+        console.error('Chat media upload error:', err);
+        res.status(500).json({ error: 'Server failed to persist uploaded chat media.' });
+      }
+    }
+  );
+
+  // Raw binary upload & directory listing for AMMON Online Meeting video recordings ('recordings/' path)
+  const handleRecordingUpload = (folderName: 'recordings' | 'meeting-recordings', storagePrefix: string) =>
+    (req: Request, res: Response) => {
+      try {
+        const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+        if (!buffer.length || buffer.length > 200 * 1024 * 1024) {
+          res.status(400).json({ error: 'Recorded video is empty or exceeds the 200 MB limit.' });
+          return;
+        }
+
+        const rawName = String(req.headers['x-file-name'] || req.query.fileName || 'meeting-recording.webm');
+        const safeMeetingId = String(req.headers['x-meeting-id'] || req.query.meetingId || 'meeting')
+          .replace(/[^a-zA-Z0-9_-]/g, '')
+          .slice(0, 64) || 'meeting';
+        const mimeType = String(req.headers['x-mime-type'] || req.query.mimeType || 'video/webm')
+          .toLowerCase()
+          .split(';')[0]
+          .trim();
+
+        const origExtMatch = rawName.match(/\.([a-zA-Z0-9]{1,6})$/);
+        const origExt = origExtMatch ? origExtMatch[1].toLowerCase() : '';
+        const ext = origExt || EXT_BY_MIME[mimeType] || 'webm';
+        const baseSafe =
+          rawName
+            .replace(/\.[a-zA-Z0-9]+$/, '')
+            .replace(/[^a-zA-Z0-9_-]/g, '_')
+            .slice(0, 48) || 'ammon_meeting';
+
+        const storedName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${baseSafe}.${ext}`;
+        const targetDir = path.join(uploadsRoot, folderName);
+        fs.mkdirSync(targetDir, { recursive: true });
+        fs.writeFileSync(path.join(targetDir, storedName), buffer);
+
+        const resolvedMime = MIME_BY_EXT[`.${ext}`] || mimeType || 'video/webm';
+
+        res.status(201).json({
+          url: `/api/uploads/${folderName}/${storedName}`,
+          storagePath: `${storagePrefix}/${safeMeetingId}/${storedName}`,
+          contentType: resolvedMime,
+          size: buffer.length,
+        });
+      } catch (err) {
+        console.error('Meeting recording backup write error:', err);
+        res.status(500).json({ error: 'Server failed to store meeting recording backup.' });
+      }
+    };
+
+  app.post(
+    '/api/uploads/recordings',
+    express.raw({ type: '*/*', limit: '205mb' }),
+    handleRecordingUpload('recordings', 'recordings')
+  );
+
+  app.post(
+    '/api/uploads/meeting-recordings',
+    express.raw({ type: '*/*', limit: '205mb' }),
+    handleRecordingUpload('meeting-recordings', 'ammon-meeting-recordings')
+  );
+
+  app.get('/api/uploads/recordings', (_req, res) => {
+    try {
+      const targetDir = path.join(uploadsRoot, 'recordings');
+      if (!fs.existsSync(targetDir)) {
+        res.json({ recordings: [] });
+        return;
+      }
+      const files = fs.readdirSync(targetDir).filter((f) => /\.(webm|mp4|mov|mkv)$/i.test(f));
+      const recordings = files
+        .map((filename) => {
+          const stat = fs.statSync(path.join(targetDir, filename));
+          const ext = path.extname(filename).toLowerCase();
+          return {
+            filename,
+            url: `/api/uploads/recordings/${filename}`,
+            storagePath: `recordings/${filename}`,
+            mimeType: MIME_BY_EXT[ext] || 'video/webm',
+            size: stat.size,
+            createdAtMs: Math.round(stat.birthtimeMs || stat.mtimeMs || Date.now()),
+          };
+        })
+        .sort((a, b) => b.createdAtMs - a.createdAtMs);
+      res.json({ recordings });
+    } catch (err) {
+      console.error('List recordings error:', err);
+      res.status(500).json({ error: 'Unable to list saved recordings.' });
+    }
+  });
+
+  app.delete('/api/uploads/recordings/:filename', (req, res) => {
+    const filename = String(req.params.filename || '');
+    if (!/^[a-zA-Z0-9._-]+$/.test(filename)) {
+      res.status(400).json({ error: 'Invalid filename.' });
+      return;
+    }
+    const filePath = path.join(uploadsRoot, 'recordings', filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.json({ deleted: true });
+  });
+
   app.get('/api/uploads/:folder/:filename', (req, res) => {
     const folder = String(req.params.folder || '');
     const filename = String(req.params.filename || '');
-    if (!['member-passports', 'kyc-documents'].includes(folder) || !/^[a-zA-Z0-9._-]+$/.test(filename)) {
+    if (
+      !['member-passports', 'kyc-documents', 'chat-media', 'recordings', 'meeting-recordings'].includes(folder) ||
+      !/^[a-zA-Z0-9._-]+$/.test(filename)
+    ) {
       res.status(400).json({ error: 'Invalid asset path.' });
       return;
     }
@@ -1596,7 +1792,15 @@ async function createAppServer() {
       res.status(404).json({ error: 'Uploaded asset not found.' });
       return;
     }
-    res.sendFile(filePath);
+    const ext = path.extname(filename).toLowerCase();
+    const contentType = MIME_BY_EXT[ext] || 'application/octet-stream';
+    res.sendFile(filePath, {
+      headers: {
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=31536000',
+      },
+    });
   });
 
   // Ensure /api/* middleware errors (e.g., PayloadTooLargeError, malformed JSON) always return JSON
@@ -1628,8 +1832,252 @@ async function createAppServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`AMMON Full-Stack Server listening on http://0.0.0.0:${PORT}`);
+  // =========================================================================
+  // 9. REAL-TIME WEBSOCKET SIGNALING FOR LIVE VIDEO & AUDIO MEETINGS
+  // =========================================================================
+  interface RtcRoomPeer {
+    peerId: string;
+    userId: string;
+    name: string;
+    role: string;
+    micOn: boolean;
+    camOn: boolean;
+    screenSharing: boolean;
+    handRaised: boolean;
+    ws: WebSocket;
+  }
+
+  const meetingRooms = new Map<string, Map<string, RtcRoomPeer>>();
+
+  const toPublicPeer = (p: RtcRoomPeer) => ({
+    peerId: p.peerId,
+    userId: p.userId,
+    name: p.name,
+    role: p.role,
+    micOn: p.micOn,
+    camOn: p.camOn,
+    screenSharing: p.screenSharing,
+    handRaised: p.handRaised,
+  });
+
+  const broadcastRoom = (roomId: string, payload: unknown, excludePeerId?: string) => {
+    const room = meetingRooms.get(roomId);
+    if (!room) return;
+    const raw = JSON.stringify(payload);
+    for (const [id, peer] of room.entries()) {
+      if (id !== excludePeerId && peer.ws.readyState === WebSocket.OPEN) {
+        peer.ws.send(raw);
+      }
+    }
+  };
+
+  const removePeerFromRoom = (roomId: string | null, peerId: string | null) => {
+    if (!roomId || !peerId) return;
+    const room = meetingRooms.get(roomId);
+    if (!room) return;
+    if (room.delete(peerId)) {
+      broadcastRoom(roomId, { type: 'peer-left', peerId });
+      if (room.size === 0) {
+        meetingRooms.delete(roomId);
+      }
+    }
+  };
+
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on('upgrade', (req, socket, head) => {
+    try {
+      const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      if (reqUrl.pathname === '/ws/meetings') {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit('connection', ws, req);
+        });
+      }
+    } catch {
+      socket.destroy();
+    }
+  });
+
+  wss.on('connection', (ws) => {
+    let joinedRoomId: string | null = null;
+    let joinedPeerId: string | null = null;
+
+    ws.on('message', (rawBuf) => {
+      try {
+        const msg = JSON.parse(rawBuf.toString('utf8')) as {
+          type?: string;
+          roomId?: string;
+          peerId?: string;
+          userId?: string;
+          name?: string;
+          role?: string;
+          micOn?: boolean;
+          camOn?: boolean;
+          screenSharing?: boolean;
+          handRaised?: boolean;
+          isRecording?: boolean;
+          startedBy?: string;
+          targetPeerId?: string;
+          signal?: unknown;
+        };
+
+        if (msg.type === 'ping') {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+          }
+          return;
+        }
+
+        if (msg.type === 'join-room' && msg.roomId && msg.peerId) {
+          if (joinedRoomId && joinedPeerId) {
+            removePeerFromRoom(joinedRoomId, joinedPeerId);
+          }
+
+          const roomId = String(msg.roomId).slice(0, 128);
+          const peerId = String(msg.peerId).slice(0, 128);
+          joinedRoomId = roomId;
+          joinedPeerId = peerId;
+
+          let room = meetingRooms.get(roomId);
+          if (!room) {
+            room = new Map<string, RtcRoomPeer>();
+            meetingRooms.set(roomId, room);
+          }
+
+          const peer: RtcRoomPeer = {
+            peerId,
+            userId: String(msg.userId || peerId).slice(0, 128),
+            name: String(msg.name || 'AMMON Member').slice(0, 128),
+            role: String(msg.role || 'Member').slice(0, 64),
+            micOn: Boolean(msg.micOn),
+            camOn: Boolean(msg.camOn),
+            screenSharing: Boolean(msg.screenSharing),
+            handRaised: Boolean(msg.handRaised),
+            ws,
+          };
+
+          room.set(peerId, peer);
+
+          const existingPeers = Array.from(room.values())
+            .filter((p) => p.peerId !== peerId)
+            .map(toPublicPeer);
+
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'room-state',
+                roomId,
+                peers: existingPeers,
+              })
+            );
+          }
+
+          broadcastRoom(
+            roomId,
+            {
+              type: 'peer-joined',
+              peer: toPublicPeer(peer),
+            },
+            peerId
+          );
+          return;
+        }
+
+        if (msg.type === 'media-state' && joinedRoomId && joinedPeerId) {
+          const room = meetingRooms.get(joinedRoomId);
+          const peer = room?.get(joinedPeerId);
+          if (!peer) return;
+          if (typeof msg.micOn === 'boolean') peer.micOn = msg.micOn;
+          if (typeof msg.camOn === 'boolean') peer.camOn = msg.camOn;
+          if (typeof msg.screenSharing === 'boolean') peer.screenSharing = msg.screenSharing;
+          if (typeof msg.handRaised === 'boolean') peer.handRaised = msg.handRaised;
+
+          broadcastRoom(
+            joinedRoomId,
+            {
+              type: 'peer-media-state',
+              peer: toPublicPeer(peer),
+            },
+            joinedPeerId
+          );
+          return;
+        }
+
+        if (msg.type === 'signal' && joinedRoomId && joinedPeerId && msg.targetPeerId && msg.signal) {
+          const room = meetingRooms.get(joinedRoomId);
+          const target = room?.get(String(msg.targetPeerId));
+          if (target && target.ws.readyState === WebSocket.OPEN) {
+            target.ws.send(
+              JSON.stringify({
+                type: 'signal',
+                fromPeerId: joinedPeerId,
+                signal: msg.signal,
+              })
+            );
+          }
+          return;
+        }
+
+        if (msg.type === 'recording-state' && joinedRoomId && joinedPeerId) {
+          broadcastRoom(
+            joinedRoomId,
+            {
+              type: 'recording-state',
+              isRecording: Boolean(msg.isRecording),
+              startedBy: String(msg.startedBy || msg.name || 'Meeting Host'),
+            },
+            joinedPeerId
+          );
+          return;
+        }
+
+        if (msg.type === 'end-meeting' && joinedRoomId && joinedPeerId) {
+          const room = meetingRooms.get(joinedRoomId);
+          const sender = room?.get(joinedPeerId);
+          broadcastRoom(
+            joinedRoomId,
+            {
+              type: 'meeting-ended',
+              roomId: joinedRoomId,
+              endedBy: sender?.name || String(msg.name || 'Meeting Host'),
+            },
+            joinedPeerId
+          );
+          if (room) {
+            room.clear();
+            meetingRooms.delete(joinedRoomId);
+          }
+          joinedRoomId = null;
+          joinedPeerId = null;
+          return;
+        }
+
+        if (msg.type === 'leave-room') {
+          removePeerFromRoom(joinedRoomId, joinedPeerId);
+          joinedRoomId = null;
+          joinedPeerId = null;
+        }
+      } catch {
+        // Ignore malformed WebSocket frames
+      }
+    });
+
+    ws.on('close', () => {
+      removePeerFromRoom(joinedRoomId, joinedPeerId);
+      joinedRoomId = null;
+      joinedPeerId = null;
+    });
+
+    ws.on('error', () => {
+      removePeerFromRoom(joinedRoomId, joinedPeerId);
+      joinedRoomId = null;
+      joinedPeerId = null;
+    });
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`AMMON Full-Stack Server & WebRTC Signaling listening on http://0.0.0.0:${PORT}`);
   });
 }
 

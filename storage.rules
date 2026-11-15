@@ -9,6 +9,32 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    // AMMON Social Space Chat Media (Videos, Audio, Photos, Documents)
+    match /ammon-chat-media/{channelId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 25 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('video/.*') ||
+          request.resource.contentType.matches('audio/.*') ||
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType == 'application/pdf'
+        );
+    }
+
+    // AMMON Online Meeting Session Recordings (Dedicated 'recordings/' folder in AMMON bucket)
+    match /recordings/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.resource.size < 250 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+    }
+
+    // Legacy path retained for backward compatibility with older recording URLs
+    match /ammon-meeting-recordings/{meetingId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 250 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

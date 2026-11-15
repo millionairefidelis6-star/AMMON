@@ -108,12 +108,15 @@ export function subscribeToMembers(
         onUpdate(list);
       },
       (error: FirestoreError) => {
-        console.error('Members listener error:', error);
-        handleFirestoreError(error, OperationType.GET, MEMBERS_PATH);
+        if (error.code === 'permission-denied') {
+          handleFirestoreError(error, OperationType.GET, MEMBERS_PATH);
+        } else {
+          console.warn('Members listener warning:', error.code, error.message);
+        }
       }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, MEMBERS_PATH);
+    console.warn('Members subscription setup warning:', error);
     return () => {};
   }
 }
@@ -137,12 +140,16 @@ export function subscribeToNews(
         }
       },
       (error: FirestoreError) => {
-        console.error('News listener error:', error);
-        handleFirestoreError(error, OperationType.GET, NEWS_PATH);
+        if (error.code === 'permission-denied') {
+          handleFirestoreError(error, OperationType.GET, NEWS_PATH);
+        } else {
+          console.warn('News listener warning:', error.code, error.message);
+          onUpdate(fallbackNews);
+        }
       }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, NEWS_PATH);
+    console.warn('News subscription setup warning:', error);
     return () => {};
   }
 }
@@ -164,12 +171,15 @@ export function subscribeToDisputes(
         onUpdate(list);
       },
       (error: FirestoreError) => {
-        console.error('Disputes listener error:', error);
-        handleFirestoreError(error, OperationType.GET, DISPUTES_PATH);
+        if (error.code === 'permission-denied') {
+          handleFirestoreError(error, OperationType.GET, DISPUTES_PATH);
+        } else {
+          console.warn('Disputes listener warning:', error.code, error.message);
+        }
       }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, DISPUTES_PATH);
+    console.warn('Disputes subscription setup warning:', error);
     return () => {};
   }
 }
@@ -192,12 +202,15 @@ export function subscribeToSocialMessages(
         onUpdate(list);
       },
       (error: FirestoreError) => {
-        console.error('Social messages listener error:', error);
-        handleFirestoreError(error, OperationType.GET, SOCIAL_MESSAGES_PATH);
+        if (error.code === 'permission-denied') {
+          handleFirestoreError(error, OperationType.GET, SOCIAL_MESSAGES_PATH);
+        } else {
+          console.warn('Social messages listener warning:', error.code, error.message);
+        }
       }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, SOCIAL_MESSAGES_PATH);
+    console.warn('Social messages subscription setup warning:', error);
     return () => {};
   }
 }
@@ -220,19 +233,26 @@ export function subscribeToMeetings(
         onUpdate(list);
       },
       (error: FirestoreError) => {
-        console.error('Meetings listener error:', error);
-        handleFirestoreError(error, OperationType.GET, MEETINGS_PATH);
+        if (error.code === 'permission-denied') {
+          handleFirestoreError(error, OperationType.GET, MEETINGS_PATH);
+        } else {
+          console.warn('Meetings listener warning:', error.code, error.message);
+        }
       }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, MEETINGS_PATH);
+    console.warn('Meetings subscription setup warning:', error);
     return () => {};
   }
 }
 
 export async function addMemberToFirestore(member: Member) {
   try {
-    await setDoc(doc(db, MEMBERS_PATH, member.id), stripUndefined(member as unknown as Record<string, unknown>));
+    await setDoc(
+      doc(db, MEMBERS_PATH, member.id),
+      stripUndefined(member as unknown as Record<string, unknown>),
+      { merge: true }
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${MEMBERS_PATH}/${member.id}`);
   }

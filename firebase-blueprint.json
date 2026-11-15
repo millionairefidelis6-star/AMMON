@@ -267,6 +267,9 @@
         "status": { "type": "string", "enum": ["Live", "Scheduled", "Ended"] },
         "agenda": { "type": "string", "maxLength": 2048 },
         "meetingCode": { "type": "string", "maxLength": 64 },
+        "isRecording": { "type": "boolean" },
+        "recordingStartedBy": { "type": "string", "maxLength": 128 },
+        "recordings": { "type": "array" },
         "createdAtMs": { "type": "number" }
       },
       "required": ["id", "title", "hostName", "status", "meetingCode", "createdAtMs"]

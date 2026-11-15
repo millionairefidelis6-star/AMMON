@@ -24,6 +24,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
     function isVerifiedUser() {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
@@ -257,6 +261,32 @@ service cloud.firestore {
         && incoming().hostName is string;
       allow update: if isValidId(meetingId);
       allow delete: if isAdmin();
+
+      // WebRTC Peer Presence Fallback Signaling
+      match /rtc_peers/{peerId} {
+        allow get, list: if true;
+        allow create, update: if isValidId(meetingId)
+          && isValidId(peerId)
+          && incoming().peerId == peerId
+          && incoming().name is string
+          && incoming().name.size() <= 128
+          && incoming().micOn is bool
+          && incoming().camOn is bool;
+        allow delete: if isValidId(meetingId) && isValidId(peerId);
+      }
+
+      // WebRTC SDP / ICE Fallback Signaling
+      match /rtc_signals/{signalId} {
+        allow get, list: if true;
+        allow create: if isValidId(meetingId)
+          && isValidId(signalId)
+          && incoming().fromPeerId is string
+          && incoming().fromPeerId.size() <= 128
+          && incoming().targetPeerId is string
+          && incoming().targetPeerId.size() <= 128
+          && incoming().kind in ['offer', 'answer', 'ice-candidate'];
+        allow delete: if isValidId(meetingId) && isValidId(signalId);
+      }
     }
   }
 }

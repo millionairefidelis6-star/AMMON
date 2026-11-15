@@ -13,6 +13,9 @@ import {
   TrendingUp,
   FileText,
   Megaphone,
+  Film,
+  Play,
+  ArrowRight,
 } from 'lucide-react';
 import {
   AdminUser,
@@ -21,6 +24,7 @@ import {
   ExecutiveReport,
   HierarchyConfig,
   Member,
+  OnlineMeeting,
 } from '../../types';
 import { resolveZoneForState } from '../../data/hierarchyData';
 import { ExecutiveApiError, fetchExecutiveWorkspace } from '../../services/executiveApi';
@@ -32,6 +36,7 @@ interface ExecutiveKpiOverviewProps {
   reports: ExecutiveReport[];
   announcements: ExecutiveAnnouncement[];
   disputes: DisputeTicket[];
+  meetings?: OnlineMeeting[];
   metrics: {
     totalMembers: number;
     activeMembers: number;
@@ -76,11 +81,44 @@ export const ExecutiveKpiOverview: React.FC<ExecutiveKpiOverviewProps> = ({
   reports,
   announcements,
   disputes,
+  meetings = [],
   metrics,
   onFilterWorkspace,
   onNavigateSection,
   onSecurityAuditRefresh,
 }) => {
+  const savedRecordings = useMemo(() => {
+    const items: {
+      id: string;
+      title: string;
+      meetingTitle: string;
+      durationLabel: string;
+      sizeLabel: string;
+      recordedBy: string;
+      recordedAt: string;
+      storagePath: string;
+      url: string;
+      createdAtMs: number;
+    }[] = [];
+    for (const mtg of meetings) {
+      if (!Array.isArray(mtg.recordings)) continue;
+      for (const rec of mtg.recordings) {
+        items.push({
+          id: rec.id,
+          title: rec.title,
+          meetingTitle: mtg.title,
+          durationLabel: rec.durationLabel,
+          sizeLabel: rec.sizeLabel,
+          recordedBy: rec.recordedBy,
+          recordedAt: rec.recordedAt,
+          storagePath: rec.storagePath,
+          url: rec.url,
+          createdAtMs: rec.createdAtMs || 0,
+        });
+      }
+    }
+    return items.sort((a, b) => b.createdAtMs - a.createdAtMs);
+  }, [meetings]);
   const level = executive.level || (executive.role === 'Super Admin' ? 'super_admin' : 'national');
   const isNationalScope =
     level === 'super_admin' ||
@@ -598,6 +636,23 @@ export const ExecutiveKpiOverview: React.FC<ExecutiveKpiOverviewProps> = ({
                   {disputes.filter((d) => d.status !== 'Resolved').length} Open
                 </span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigateSection('saved-recordings')}
+                className="w-full p-3 rounded-xl bg-[#EAF3ED]/70 hover:bg-[#EAF3ED] border border-[#176B37]/30 flex items-center justify-between transition-colors cursor-pointer text-left"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Film className="w-4 h-4 text-[#176B37]" />
+                  <div>
+                    <p className="font-bold text-[#14532D]">Saved Recordings</p>
+                    <p className="text-[10px] text-gray-600">AMMON bucket (/recordings/)</p>
+                  </div>
+                </div>
+                <span className="font-mono font-bold text-[#176B37] bg-white px-2 py-0.5 rounded border border-[#176B37]/25">
+                  {savedRecordings.length} Saved
+                </span>
+              </button>
             </div>
           </div>
 
@@ -650,6 +705,82 @@ export const ExecutiveKpiOverview: React.FC<ExecutiveKpiOverviewProps> = ({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Saved Recordings Quick-Access Panel on Admin Overview */}
+      <div className="bg-white p-5 rounded-2xl border border-[#E5E7EB] shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-gray-100">
+          <div>
+            <h4 className="text-xs font-bold text-[#14532D] uppercase tracking-wider flex items-center gap-1.5">
+              <Film className="w-4 h-4 text-[#176B37]" />
+              <span>Saved Recordings (AMMON Storage /recordings/)</span>
+            </h4>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Quick replay &amp; download access for recorded online meetings
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateSection('saved-recordings')}
+            className="px-3.5 py-1.5 rounded-xl bg-[#EAF3ED] hover:bg-[#176B37] text-[#176B37] hover:text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
+          >
+            <span>Open Saved Recordings</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {savedRecordings.length === 0 ? (
+          <div className="p-4 rounded-xl bg-[#F9FBFA] border border-dashed border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-gray-600">
+            <span>
+              No meeting videos archived yet. Recordings captured in Online Meetings save automatically to{' '}
+              <code className="font-mono text-[11px] text-[#176B37]">recordings/{'{meetingId}'}/</code>.
+            </span>
+            <button
+              type="button"
+              onClick={() => onNavigateSection('online-meetings')}
+              className="px-3 py-1.5 rounded-lg bg-[#176B37] text-white font-bold text-[11px] hover:bg-[#14532D] cursor-pointer shrink-0 self-start sm:self-auto"
+            >
+              Open Online Meetings
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {savedRecordings.slice(0, 6).map((rec) => (
+              <div
+                key={rec.id}
+                className="p-3.5 rounded-xl border border-[#E5E7EB] bg-[#F9FBFA] hover:border-[#176B37]/40 transition-colors flex flex-col justify-between gap-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="font-bold text-xs text-[#252525] truncate">{rec.title}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    {rec.durationLabel} • {rec.sizeLabel} • {rec.recordedBy}
+                  </p>
+                  <p className="text-[10px] font-mono text-gray-400 truncate mt-0.5">
+                    {rec.storagePath}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onNavigateSection('saved-recordings')}
+                    className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#176B37] hover:bg-[#14532D] text-white text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Play className="w-3 h-3 fill-white" />
+                    <span>Watch</span>
+                  </button>
+                  <a
+                    href={rec.url}
+                    download={`${rec.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.webm`}
+                    className="py-1.5 px-2.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-100 text-gray-700 text-[11px] font-semibold flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Save</span>
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

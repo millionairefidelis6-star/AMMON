@@ -23,6 +23,7 @@ import {
   UserCog,
   Loader2,
   AlertCircle,
+  Film,
 } from 'lucide-react';
 import {
   AdminUser,
@@ -58,6 +59,7 @@ import { ExecutiveReportsWorkspace } from './executive/ExecutiveReportsWorkspace
 import { ExecutiveAnnouncementsWorkspace } from './executive/ExecutiveAnnouncementsWorkspace';
 import { SuperAdminGovernanceWorkspace } from './executive/SuperAdminGovernanceWorkspace';
 import { AuditTrailWorkspace } from './executive/AuditTrailWorkspace';
+import { SavedRecordingsWorkspace } from './executive/SavedRecordingsWorkspace';
 
 export type AdminSection =
   | 'overview'
@@ -72,6 +74,7 @@ export type AdminSection =
   | 'security'
   | 'social-space'
   | 'online-meetings'
+  | 'saved-recordings'
   | ServiceSectionId;
 
 interface AdminDashboardModalProps {
@@ -233,6 +236,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     Boolean(activeExec.permissions?.canManageExecutives) ||
     Boolean(activeExec.permissions?.canManageHierarchy);
   const canViewAudit = isSuperAdmin || Boolean(activeExec.permissions?.canViewAuditLogs) || execLevel === 'specialized';
+  const totalSavedRecordings = meetings.reduce(
+    (sum, m) => sum + (Array.isArray(m.recordings) ? m.recordings.length : 0),
+    0
+  );
 
   const navItems: { id: AdminSection; label: string; icon: React.ComponentType<{ className?: string }>; badge: string }[] = [
     {
@@ -627,6 +634,52 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     : `${meetings.length} Rooms`}
                 </span>
               </button>
+
+              <button
+                onClick={() => {
+                  setActiveSection('saved-recordings');
+                  setSidebarOpenMobile(false);
+                }}
+                className={`
+                  w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-semibold
+                  transition-all duration-150 cursor-pointer group
+                  ${
+                    activeSection === 'saved-recordings'
+                      ? 'bg-[#176B37] text-white shadow-xs'
+                      : 'text-[#252525] hover:bg-[#EAF3ED] hover:text-[#176B37]'
+                  }
+                `}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`
+                      w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors
+                      ${
+                        activeSection === 'saved-recordings'
+                          ? 'bg-white/20 text-white'
+                          : 'bg-[#EAF3ED]/70 text-[#176B37] group-hover:bg-white'
+                      }
+                    `}
+                  >
+                    <Film className="w-4 h-4" />
+                  </div>
+                  <span className="truncate text-left">Saved Recordings</span>
+                </div>
+                <span
+                  className={`
+                    text-[9px] px-2 py-0.5 rounded-full font-medium shrink-0 ml-1
+                    ${
+                      activeSection === 'saved-recordings'
+                        ? 'bg-white/20 text-white'
+                        : totalSavedRecordings > 0
+                        ? 'bg-[#EAF3ED] text-[#176B37] font-bold'
+                        : 'bg-gray-100 text-gray-600'
+                    }
+                  `}
+                >
+                  {totalSavedRecordings} Saved
+                </span>
+              </button>
             </div>
           </div>
 
@@ -683,6 +736,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     ? 'AMMON Social Space'
                     : activeSection === 'online-meetings'
                     ? 'Online Meetings & Video Rooms'
+                    : activeSection === 'saved-recordings'
+                    ? 'Saved Meeting Recordings'
                     : navItems.find((n) => n.id === activeSection)?.label ||
                       DASHBOARD_SERVICES_MENU.find((s) => s.id === activeSection)?.label}
                 </h2>
@@ -743,6 +798,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                   reports={scopedReports}
                   announcements={scopedAnnouncements}
                   disputes={scopedDisputes}
+                  meetings={meetings}
                   metrics={computedMetrics}
                   onFilterWorkspace={async (filters) => {
                     setGeoFilters(filters);
@@ -1203,6 +1259,16 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                     initialTab={activeSection === 'online-meetings' ? 'meetings' : 'chat'}
                   />
                 </div>
+              )}
+
+              {/* 13. SAVED MEETING RECORDINGS ARCHIVE */}
+              {activeSection === 'saved-recordings' && (
+                <SavedRecordingsWorkspace
+                  executive={activeExec}
+                  meetings={meetings}
+                  onUpdateMeeting={onUpdateMeeting}
+                  onOpenMeetings={() => setActiveSection('online-meetings')}
+                />
               )}
             </div>
           </main>

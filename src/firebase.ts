@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { getApp, getApps, initializeApp, FirebaseApp } from 'firebase/app';
 import { 
   getAuth, 
   signOut, 
@@ -7,7 +7,9 @@ import {
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
-  getFirestore, 
+  getFirestore,
+  initializeFirestore,
+  Firestore,
   doc, 
   getDocFromServer,
   collection,
@@ -21,17 +23,65 @@ import {
   getStorage,
   ref as storageRef,
   uploadBytes,
+  uploadBytesResumable,
   getDownloadURL,
+  listAll,
+  getMetadata,
+  deleteObject,
 } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+const viteEnv = (import.meta as { env?: Record<string, string | undefined> })?.env || {};
 
-// CRITICAL: Must pass firestoreDatabaseId
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const resolvedConfig = {
+  projectId: viteEnv.VITE_AMMON_FIREBASE_PROJECT_ID?.trim() || firebaseConfig.projectId,
+  appId: viteEnv.VITE_AMMON_FIREBASE_APP_ID?.trim() || firebaseConfig.appId,
+  apiKey: viteEnv.VITE_AMMON_FIREBASE_API_KEY?.trim() || firebaseConfig.apiKey,
+  authDomain: viteEnv.VITE_AMMON_FIREBASE_AUTH_DOMAIN?.trim() || firebaseConfig.authDomain,
+  messagingSenderId:
+    viteEnv.VITE_AMMON_FIREBASE_MESSAGING_SENDER_ID?.trim() || firebaseConfig.messagingSenderId,
+  measurementId:
+    viteEnv.VITE_AMMON_FIREBASE_MEASUREMENT_ID?.trim() || firebaseConfig.measurementId,
+  firestoreDatabaseId:
+    viteEnv.VITE_AMMON_FIRESTORE_DATABASE_ID?.trim() || firebaseConfig.firestoreDatabaseId,
+  storageBucket:
+    viteEnv.VITE_AMMON_STORAGE_BUCKET?.trim() || firebaseConfig.storageBucket || '',
+};
+
+const AMMON_APP_NAME = 'ammon-app';
+
+// Initialize isolated AMMON Firebase App instance
+const app: FirebaseApp =
+  getApps().find((a) => a.name === AMMON_APP_NAME) ||
+  initializeApp(
+    {
+      projectId: resolvedConfig.projectId,
+      appId: resolvedConfig.appId,
+      apiKey: resolvedConfig.apiKey,
+      authDomain: resolvedConfig.authDomain,
+      messagingSenderId: resolvedConfig.messagingSenderId,
+      measurementId: resolvedConfig.measurementId,
+      storageBucket: resolvedConfig.storageBucket,
+    },
+    AMMON_APP_NAME
+  );
+
+// CRITICAL: Must pass firestoreDatabaseId; force long-polling to avoid 10s WebChannel stalls in iframes/mobile networks
+function createFirestoreClient(): Firestore {
+  try {
+    return initializeFirestore(
+      app,
+      { experimentalForceLongPolling: true },
+      resolvedConfig.firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(app, resolvedConfig.firestoreDatabaseId);
+  }
+}
+
+export const db = createFirestoreClient();
 export const auth = getAuth(app);
-export const STORAGE_BUCKET = firebaseConfig.storageBucket || '';
+export const STORAGE_BUCKET = resolvedConfig.storageBucket;
 export const storage = getStorage(
   app,
   STORAGE_BUCKET ? `gs://${STORAGE_BUCKET}` : undefined
@@ -41,7 +91,11 @@ export {
   sendPasswordResetEmail,
   storageRef,
   uploadBytes,
+  uploadBytesResumable,
   getDownloadURL,
+  listAll,
+  getMetadata,
+  deleteObject,
   type FirebaseUser,
 };
 

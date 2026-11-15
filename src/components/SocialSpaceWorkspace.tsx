@@ -31,10 +31,31 @@ import {
   Radio,
   Sparkles,
   ShieldCheck,
-  Crown
+  Crown,
+  Film,
+  Volume2,
+  VolumeX,
+  Maximize2,
+  Loader2,
+  Wifi,
+  Power,
+  Disc,
+  Square,
+  Play
 } from 'lucide-react';
-import { Member, AdminUser, SocialMessage, OnlineMeeting } from '../types';
+import { Member, AdminUser, SocialMessage, OnlineMeeting, MeetingRecording } from '../types';
 import { SOCIAL_CHANNELS, ADMIN_USERS } from '../data/mockData';
+import {
+  uploadChatMediaAsset,
+  uploadMeetingRecordingAsset,
+  isVideoFile,
+  isAudioFile,
+} from '../services/storageService';
+import {
+  RtcPeerInfo,
+  RtcSignalPayload,
+  RtcSignalingSession,
+} from '../services/rtcSignalingService';
 
 export type SocialSpaceTab = 'chat' | 'meetings';
 
@@ -132,9 +153,14 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     data: string;
   } | null>(null);
   const [uploadError, setUploadError] = useState('');
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [openPickerMsgId, setOpenPickerMsgId] = useState<string | null>(null);
   const [showEmojiComposer, setShowEmojiComposer] = useState(false);
-  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{
+    src: string;
+    name: string;
+    kind: 'image' | 'video';
+  } | null>(null);
 
   // @ Mention state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -142,7 +168,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Meetings state
+  // Meetings & WebRTC Live Audio/Video state
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [newMeetingTitle, setNewMeetingTitle] = useState('');
@@ -152,14 +178,68 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
   const [newMeetingAgenda, setNewMeetingAgenda] = useState('');
   const [copiedMeetCode, setCopiedMeetCode] = useState(false);
 
-  // WebRTC / Local Media state inside Live Meeting Room
+  // Independent Mic / Camera / Screen-Share / Speaker Controls + Live WebRTC Peers
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
+  const [audioPlaybackBlocked, setAudioPlaybackBlocked] = useState(false);
+  const [rtcTransportMode, setRtcTransportMode] = useState<'websocket' | 'firestore' | 'connecting'>('connecting');
+  const [remotePeers, setRemotePeers] = useState<RtcPeerInfo[]>([]);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [peerConnStates, setPeerConnStates] = useState<Record<string, string>>({});
   const [mediaNotice, setMediaNotice] = useState('');
+  const [meetingLobbyNotice, setMeetingLobbyNotice] = useState('');
+  const [localVideoRevision, setLocalVideoRevision] = useState(0);
   const [meetingChatText, setMeetingChatText] = useState('');
+
+  // Meeting Recording state (host controls recording & saves video to AMMON Firebase Storage bucket)
+  const [isLocalRecording, setIsLocalRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [remoteRecordingBy, setRemoteRecordingBy] = useState<string | null>(null);
+  const [isUploadingRecording, setIsUploadingRecording] = useState(false);
+  const [recordingUploadPct, setRecordingUploadPct] = useState(0);
+  const [recordingStatusMessage, setRecordingStatusMessage] = useState('');
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
+  const localVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+  const localPreviewStreamRef = useRef<MediaStream | null>(null);
+  const pendingAudioInitRef = useRef<Promise<MediaStreamTrack | null> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const signalingRef = useRef<RtcSignalingSession | null>(null);
+  const selfPeerIdRef = useRef<string>(
+    `peer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  );
+
+  // Refs for session MediaRecorder compositor
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<BlobPart[]>([]);
+  const recordingDrawTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingDurationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingAudioCtxRef = useRef<AudioContext | null>(null);
+  const recordingAudioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const connectedRecordingAudioIdsRef = useRef<Set<string>>(new Set());
+  const recordingCompositeStreamRef = useRef<MediaStream | null>(null);
+  const recordingSecondsRef = useRef<number>(0);
+
+  const peerConnectionsRef = useRef<
+    Map<
+      string,
+      {
+        pc: RTCPeerConnection;
+        remoteStream: MediaStream;
+        audioTx?: RTCRtpTransceiver;
+        videoTx?: RTCRtpTransceiver;
+        audioSender?: RTCRtpSender;
+        videoSender?: RTCRtpSender;
+        polite: boolean;
+        makingOffer: boolean;
+        ignoreOffer: boolean;
+        pendingCandidates: RTCIceCandidateInit[];
+      }
+    >
+  >(new Map());
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -203,77 +283,788 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
   const activeMeeting = meetings.find((m) => m.id === activeMeetingId) || null;
   const liveMeetingsCount = meetings.filter((m) => m.status === 'Live').length;
 
+  const isUserMeetingHost = (mtg: OnlineMeeting | null): boolean => {
+    if (!mtg) return false;
+    return Boolean(
+      (mtg.hostId && currentUser.id && mtg.hostId === currentUser.id) ||
+        (mtg.hostName &&
+          currentUser.name &&
+          mtg.hostName.trim().toLowerCase() === currentUser.name.trim().toLowerCase())
+    );
+  };
+
+  const isMeetingHost = isUserMeetingHost(activeMeeting);
+
+  // Fresh refs for 20fps session recording compositor
+  const liveRecordingStateRef = useRef({
+    activeMeeting: activeMeeting,
+    camOn,
+    screenSharing,
+    micOn,
+    remotePeers,
+    userName: currentUser.name,
+  });
+  liveRecordingStateRef.current = {
+    activeMeeting,
+    camOn,
+    screenSharing,
+    micOn,
+    remotePeers,
+    userName: currentUser.name,
+  };
+
+  const formatRecDuration = (secs: number): string => {
+    const mins = Math.floor(secs / 60);
+    const rem = secs % 60;
+    return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+  };
+
+  const syncAudioTracksToRecorder = () => {
+    const ctx = recordingAudioCtxRef.current;
+    const dest = recordingAudioDestRef.current;
+    if (!ctx || !dest) return;
+
+    const candidateTracks: MediaStreamTrack[] = [];
+    if (localAudioTrackRef.current && localAudioTrackRef.current.readyState === 'live') {
+      candidateTracks.push(localAudioTrackRef.current);
+    }
+    for (const stream of Object.values(remoteStreams)) {
+      if (!stream) continue;
+      for (const t of stream.getAudioTracks()) {
+        if (t.readyState === 'live') candidateTracks.push(t);
+      }
+    }
+
+    for (const track of candidateTracks) {
+      if (connectedRecordingAudioIdsRef.current.has(track.id)) continue;
+      try {
+        const src = ctx.createMediaStreamSource(new MediaStream([track]));
+        src.connect(dest);
+        connectedRecordingAudioIdsRef.current.add(track.id);
+      } catch {
+        // Ignore unconnectable tracks
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (isLocalRecording) {
+      syncAudioTracksToRecorder();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLocalRecording, remoteStreams, micOn]);
+
+  const cleanupRecorderResources = () => {
+    if (recordingDrawTimerRef.current) {
+      clearInterval(recordingDrawTimerRef.current);
+      recordingDrawTimerRef.current = null;
+    }
+    if (recordingDurationTimerRef.current) {
+      clearInterval(recordingDurationTimerRef.current);
+      recordingDurationTimerRef.current = null;
+    }
+    if (recordingCompositeStreamRef.current) {
+      recordingCompositeStreamRef.current.getTracks().forEach((t) => t.stop());
+      recordingCompositeStreamRef.current = null;
+    }
+    if (recordingAudioCtxRef.current) {
+      recordingAudioCtxRef.current.close().catch(() => {});
+      recordingAudioCtxRef.current = null;
+    }
+    recordingAudioDestRef.current = null;
+    connectedRecordingAudioIdsRef.current.clear();
+  };
+
+  const unlockAudioPlayback = () => {
+    try {
+      if (typeof window === 'undefined') return;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioCtx();
+      }
+      if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
+    } catch {
+      // Ignore AudioContext unlock issues
+    }
+  };
+
+  const formatMediaDeviceError = (err: unknown, deviceLabel: string): string => {
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      return `${deviceLabel} requires HTTPS or localhost. Please open AMMON on a secure connection.`;
+    }
+    const domErr = err as { name?: string; message?: string } | undefined;
+    const name = domErr?.name || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+      return `${deviceLabel} permission was denied by your browser. Click the site lock/camera icon in your address bar to Allow ${deviceLabel} access, then retry.`;
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return `No physical ${deviceLabel.toLowerCase()} device was found on this computer or phone.`;
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return `Your ${deviceLabel.toLowerCase()} is currently in use by another app. Close the other app and try again.`;
+    }
+    return `Unable to access ${deviceLabel.toLowerCase()}${domErr?.message ? ` (${domErr.message})` : ''}.`;
+  };
+
+  const acquireDeviceAudioTrack = async (): Promise<MediaStreamTrack | null> => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return null;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+      return stream.getAudioTracks()[0] || null;
+    } catch (err) {
+      const domErr = err as { name?: string } | undefined;
+      if (domErr?.name === 'OverconstrainedError' || domErr?.name === 'TypeError') {
+        const fallback = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        return fallback.getAudioTracks()[0] || null;
+      }
+      throw err;
+    }
+  };
+
+  const acquireDeviceCameraTrack = async (): Promise<MediaStreamTrack | null> => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return null;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      return stream.getVideoTracks()[0] || null;
+    } catch (err) {
+      const domErr = err as { name?: string } | undefined;
+      if (
+        domErr?.name === 'OverconstrainedError' ||
+        domErr?.name === 'NotReadableError' ||
+        domErr?.name === 'TypeError'
+      ) {
+        const fallback = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        return fallback.getVideoTracks()[0] || null;
+      }
+      throw err;
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'chat') {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [channelMessages.length, activeChannelId, activeTab]);
 
-  // Cleanup media streams on unmount or leaving meeting
-  const stopLocalMedia = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
+  // Bind local camera/screen preview video element whenever camOn, screenSharing, or track updates
+  useEffect(() => {
+    if ((camOn || screenSharing) && videoRef.current && localVideoTrackRef.current) {
+      const previewStream = new MediaStream([localVideoTrackRef.current]);
+      localPreviewStreamRef.current = previewStream;
+      videoRef.current.srcObject = previewStream;
+      videoRef.current.play().catch(() => {});
+    } else if (!camOn && !screenSharing && videoRef.current) {
+      videoRef.current.srcObject = null;
+      localPreviewStreamRef.current = null;
+    }
+  }, [camOn, screenSharing, localVideoRevision]);
+
+  const negotiateWithPeer = async (
+    remotePeerId: string,
+    entry: {
+      pc: RTCPeerConnection;
+      makingOffer: boolean;
+    }
+  ) => {
+    const { pc } = entry;
+    if (entry.makingOffer || pc.signalingState !== 'stable') return;
+    try {
+      entry.makingOffer = true;
+      const offer = await pc.createOffer();
+      if (pc.signalingState !== 'stable') return;
+      await pc.setLocalDescription(offer);
+      if (pc.localDescription) {
+        signalingRef.current?.sendSignal(remotePeerId, {
+          kind: 'offer',
+          sdp: pc.localDescription.toJSON(),
+        });
+      }
+    } catch (err) {
+      console.warn('WebRTC renegotiation error:', err);
+    } finally {
+      entry.makingOffer = false;
+    }
+  };
+
+  const replaceAudioTrackOnPeers = async (track: MediaStreamTrack | null) => {
+    for (const [peerId, entry] of peerConnectionsRef.current.entries()) {
+      try {
+        let tx =
+          entry.audioTx ||
+          entry.pc.getTransceivers().find((t) => t.receiver.track?.kind === 'audio');
+        if (!tx && track) {
+          tx = entry.pc.addTransceiver('audio', { direction: 'sendrecv' });
+        }
+        if (tx) {
+          entry.audioTx = tx;
+          entry.audioSender = tx.sender;
+          if (tx.direction !== 'sendrecv') {
+            tx.direction = 'sendrecv';
+          }
+          await tx.sender.replaceTrack(track);
+          if (
+            track &&
+            entry.pc.signalingState === 'stable' &&
+            tx.currentDirection !== 'sendrecv' &&
+            tx.currentDirection !== 'sendonly'
+          ) {
+            await negotiateWithPeer(peerId, entry);
+          }
+        }
+      } catch (err) {
+        console.warn('replaceTrack(audio) warning:', err);
+      }
+    }
+  };
+
+  const replaceVideoTrackOnPeers = async (track: MediaStreamTrack | null) => {
+    for (const [peerId, entry] of peerConnectionsRef.current.entries()) {
+      try {
+        let tx =
+          entry.videoTx ||
+          entry.pc.getTransceivers().find((t) => t.receiver.track?.kind === 'video');
+        if (!tx && track) {
+          tx = entry.pc.addTransceiver('video', { direction: 'sendrecv' });
+        }
+        if (tx) {
+          entry.videoTx = tx;
+          entry.videoSender = tx.sender;
+          if (tx.direction !== 'sendrecv') {
+            tx.direction = 'sendrecv';
+          }
+          await tx.sender.replaceTrack(track);
+          if (
+            track &&
+            entry.pc.signalingState === 'stable' &&
+            tx.currentDirection !== 'sendrecv' &&
+            tx.currentDirection !== 'sendonly'
+          ) {
+            await negotiateWithPeer(peerId, entry);
+          }
+        }
+      } catch (err) {
+        console.warn('replaceTrack(video) warning:', err);
+      }
+    }
+  };
+
+  const closePeerConnection = (remotePeerId: string) => {
+    const entry = peerConnectionsRef.current.get(remotePeerId);
+    if (entry) {
+      try {
+        entry.pc.onnegotiationneeded = null;
+        entry.pc.onicecandidate = null;
+        entry.pc.ontrack = null;
+        entry.pc.onconnectionstatechange = null;
+        entry.pc.close();
+      } catch {
+        // ignore
+      }
+      peerConnectionsRef.current.delete(remotePeerId);
+    }
+    setRemoteStreams((prev) => {
+      if (!(remotePeerId in prev)) return prev;
+      const next = { ...prev };
+      delete next[remotePeerId];
+      return next;
+    });
+    setPeerConnStates((prev) => {
+      if (!(remotePeerId in prev)) return prev;
+      const next = { ...prev };
+      delete next[remotePeerId];
+      return next;
+    });
+  };
+
+  const ensurePeerConnection = (remotePeerId: string) => {
+    const existing = peerConnectionsRef.current.get(remotePeerId);
+    if (existing) return existing;
+
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        {
+          urls: [
+            'stun:stun.l.google.com:19302',
+            'stun:stun1.l.google.com:19302',
+            'stun:stun2.l.google.com:19302',
+          ],
+        },
+      ],
+    });
+
+    const remoteStream = new MediaStream();
+    const polite = selfPeerIdRef.current > remotePeerId;
+
+    let audioTx: RTCRtpTransceiver | undefined;
+    let videoTx: RTCRtpTransceiver | undefined;
+
+    if (!polite) {
+      // Initial offerer pre-creates sendrecv transceivers so audio + video m-lines exist cleanly
+      audioTx = pc.addTransceiver('audio', { direction: 'sendrecv' });
+      videoTx = pc.addTransceiver('video', { direction: 'sendrecv' });
+
+      if (localAudioTrackRef.current) {
+        audioTx.sender.replaceTrack(localAudioTrackRef.current).catch(() => {});
+      }
+      if (localVideoTrackRef.current) {
+        videoTx.sender.replaceTrack(localVideoTrackRef.current).catch(() => {});
+      }
+    }
+
+    const entry = {
+      pc,
+      remoteStream,
+      audioTx,
+      videoTx,
+      audioSender: audioTx?.sender,
+      videoSender: videoTx?.sender,
+      polite,
+      makingOffer: false,
+      ignoreOffer: false,
+      pendingCandidates: [] as RTCIceCandidateInit[],
+    };
+
+    peerConnectionsRef.current.set(remotePeerId, entry);
+
+    pc.onnegotiationneeded = async () => {
+      if (pc.localDescription === null && entry.polite) {
+        return;
+      }
+      await negotiateWithPeer(remotePeerId, entry);
+    };
+
+    pc.onicecandidate = (evt) => {
+      if (evt.candidate) {
+        signalingRef.current?.sendSignal(remotePeerId, {
+          kind: 'ice-candidate',
+          candidate: evt.candidate.toJSON(),
+        });
+      }
+    };
+
+    pc.ontrack = (evt) => {
+      const track = evt.track;
+      if (!entry.remoteStream.getTracks().some((t) => t.id === track.id)) {
+        entry.remoteStream.addTrack(track);
+      }
+      const refreshRemoteStream = () => {
+        const updatedStream = new MediaStream(entry.remoteStream.getTracks());
+        entry.remoteStream = updatedStream;
+        setRemoteStreams((prev) => ({
+          ...prev,
+          [remotePeerId]: updatedStream,
+        }));
+      };
+      track.onunmute = refreshRemoteStream;
+      refreshRemoteStream();
+    };
+
+    pc.onconnectionstatechange = () => {
+      setPeerConnStates((prev) => ({
+        ...prev,
+        [remotePeerId]: pc.connectionState,
+      }));
+      if (pc.connectionState === 'failed') {
+        pc.restartIce();
+      }
+    };
+
+    return entry;
+  };
+
+  const handleIncomingSignal = async (fromPeerId: string, signal: RtcSignalPayload) => {
+    const entry = ensurePeerConnection(fromPeerId);
+    const { pc } = entry;
+
+    try {
+      if (signal.kind === 'offer') {
+        const offerCollision = entry.makingOffer || pc.signalingState !== 'stable';
+        entry.ignoreOffer = !entry.polite && offerCollision;
+        if (entry.ignoreOffer) return;
+
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+
+        // Bind matched transceivers to sendrecv and attach local mic/cam tracks BEFORE creating answer
+        const transceivers = pc.getTransceivers();
+        for (const tx of transceivers) {
+          const kind = tx.receiver.track?.kind;
+          if (kind === 'audio') {
+            entry.audioTx = tx;
+            entry.audioSender = tx.sender;
+            if (tx.direction !== 'sendrecv') tx.direction = 'sendrecv';
+            if (localAudioTrackRef.current) {
+              await tx.sender.replaceTrack(localAudioTrackRef.current).catch(() => {});
+            }
+          } else if (kind === 'video') {
+            entry.videoTx = tx;
+            entry.videoSender = tx.sender;
+            if (tx.direction !== 'sendrecv') tx.direction = 'sendrecv';
+            if (localVideoTrackRef.current) {
+              await tx.sender.replaceTrack(localVideoTrackRef.current).catch(() => {});
+            }
+          }
+        }
+
+        for (const cand of entry.pendingCandidates.splice(0)) {
+          await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+        }
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        if (pc.localDescription) {
+          signalingRef.current?.sendSignal(fromPeerId, {
+            kind: 'answer',
+            sdp: pc.localDescription.toJSON(),
+          });
+        }
+      } else if (signal.kind === 'answer') {
+        if (pc.signalingState === 'have-local-offer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          for (const cand of entry.pendingCandidates.splice(0)) {
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+          }
+        }
+      } else if (signal.kind === 'ice-candidate') {
+        if (!pc.remoteDescription) {
+          entry.pendingCandidates.push(signal.candidate);
+        } else {
+          await pc.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch((err) => {
+            if (!entry.ignoreOffer) {
+              console.warn('ICE candidate error:', err);
+            }
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('WebRTC signal handling error:', err);
+    }
+  };
+
+  const stopVideoTrackOnly = () => {
+    if (localVideoTrackRef.current) {
+      localVideoTrackRef.current.stop();
+      localVideoTrackRef.current = null;
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    localPreviewStreamRef.current = null;
+    replaceVideoTrackOnPeers(null).catch(() => {});
     setCamOn(false);
     setScreenSharing(false);
   };
 
+  const stopAllLocalMediaAndRtc = () => {
+    pendingAudioInitRef.current = null;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+    mediaRecorderRef.current = null;
+    cleanupRecorderResources();
+    setIsLocalRecording(false);
+    setRemoteRecordingBy(null);
+    setRecordingSeconds(0);
+    if (signalingRef.current) {
+      signalingRef.current.stop();
+      signalingRef.current = null;
+    }
+    for (const peerId of Array.from(peerConnectionsRef.current.keys())) {
+      closePeerConnection(peerId);
+    }
+    if (localAudioTrackRef.current) {
+      localAudioTrackRef.current.stop();
+      localAudioTrackRef.current = null;
+    }
+    stopVideoTrackOnly();
+    setRemotePeers([]);
+    setRemoteStreams({});
+    setPeerConnStates({});
+    setAudioPlaybackBlocked(false);
+  };
+
+  // Exit room automatically if the host updates Firestore/app meeting status to 'Ended'
   useEffect(() => {
-    return () => {
-      stopLocalMedia();
+    if (activeMeetingId && activeMeeting && activeMeeting.status === 'Ended') {
+      stopAllLocalMediaAndRtc();
+      setActiveMeetingId(null);
+      setMeetingLobbyNotice(`Meeting "${activeMeeting.title}" was concluded by the host (${activeMeeting.hostName}).`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMeetingId, activeMeeting?.status]);
+
+  // Lifecycle effect: manage WebRTC room signaling when activeMeetingId changes
+  useEffect(() => {
+    if (!activeMeetingId) return;
+
+    let cancelled = false;
+    const roomId = activeMeetingId;
+    const selfId = `peer-${currentUser.id.replace(/[^a-zA-Z0-9_-]/g, '')}-${Date.now().toString(36).slice(-4)}`;
+    selfPeerIdRef.current = selfId;
+
+    const startRoom = async () => {
+      let audioTrack: MediaStreamTrack | null = localAudioTrackRef.current;
+
+      if (!audioTrack && pendingAudioInitRef.current) {
+        audioTrack = await pendingAudioInitRef.current;
+        pendingAudioInitRef.current = null;
+      }
+
+      if (
+        !audioTrack &&
+        typeof navigator !== 'undefined' &&
+        typeof navigator.mediaDevices?.getUserMedia === 'function'
+      ) {
+        try {
+          audioTrack = await acquireDeviceAudioTrack();
+        } catch (err) {
+          if (!cancelled) {
+            setMediaNotice(formatMediaDeviceError(err, 'Microphone'));
+          }
+        }
+      } else if (
+        !audioTrack &&
+        (typeof navigator === 'undefined' ||
+          typeof navigator.mediaDevices?.getUserMedia !== 'function')
+      ) {
+        setMediaNotice(
+          'Browser audio capture unavailable in this context. Ensure HTTPS and camera/microphone permissions are enabled.'
+        );
+      }
+
+      if (cancelled) {
+        if (audioTrack && audioTrack !== localAudioTrackRef.current) {
+          audioTrack.stop();
+        }
+        return;
+      }
+
+      let initialMic = false;
+      if (audioTrack) {
+        audioTrack.enabled = true;
+        localAudioTrackRef.current = audioTrack;
+        initialMic = true;
+        await replaceAudioTrackOnPeers(audioTrack);
+      }
+
+      if (cancelled) return;
+      setMicOn(initialMic);
+
+      const session = new RtcSignalingSession(
+        roomId,
+        {
+          peerId: selfId,
+          userId: currentUser.id,
+          name: currentUser.name,
+          role: currentUser.role,
+          micOn: initialMic,
+          camOn: Boolean(localVideoTrackRef.current && camOn),
+          screenSharing: Boolean(localVideoTrackRef.current && screenSharing),
+          handRaised: false,
+        },
+        {
+          onTransportChange: (mode) => {
+            if (!cancelled) setRtcTransportMode(mode);
+          },
+          onPeersChange: (peers) => {
+            if (cancelled) return;
+            setRemotePeers(peers);
+            const activeIds = new Set(peers.map((p) => p.peerId));
+            for (const existingId of Array.from(peerConnectionsRef.current.keys())) {
+              if (!activeIds.has(existingId)) {
+                closePeerConnection(existingId);
+              }
+            }
+            for (const peer of peers) {
+              ensurePeerConnection(peer.peerId);
+            }
+          },
+          onSignal: (fromPeerId, signal) => {
+            if (!cancelled) {
+              handleIncomingSignal(fromPeerId, signal);
+            }
+          },
+          onRecordingState: (isRec, startedBy) => {
+            if (!cancelled) {
+              setRemoteRecordingBy(isRec ? startedBy || 'Meeting Host' : null);
+            }
+          },
+          onMeetingEnded: (endedBy) => {
+            if (cancelled) return;
+            stopAllLocalMediaAndRtc();
+            setActiveMeetingId(null);
+            setMeetingLobbyNotice(
+              `This online meeting was ended by ${endedBy || 'the meeting host'}.`
+            );
+          },
+        }
+      );
+
+      signalingRef.current = session;
+      session.start();
     };
-  }, []);
+
+    startRoom();
+
+    return () => {
+      cancelled = true;
+      stopAllLocalMediaAndRtc();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMeetingId]);
+
+  const handleToggleMic = async () => {
+    setMediaNotice('');
+    unlockAudioPlayback();
+    if (localAudioTrackRef.current) {
+      const nextMic = !micOn;
+      localAudioTrackRef.current.enabled = nextMic;
+      setMicOn(nextMic);
+      signalingRef.current?.updateMediaState({ micOn: nextMic });
+      return;
+    }
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setMediaNotice(formatMediaDeviceError(null, 'Microphone'));
+        return;
+      }
+      const track = await acquireDeviceAudioTrack();
+      if (!track) {
+        setMediaNotice('No active microphone track detected on this device.');
+        return;
+      }
+      track.enabled = true;
+      localAudioTrackRef.current = track;
+      await replaceAudioTrackOnPeers(track);
+      setMicOn(true);
+      signalingRef.current?.updateMediaState({ micOn: true });
+    } catch (err) {
+      setMediaNotice(formatMediaDeviceError(err, 'Microphone'));
+    }
+  };
 
   const handleToggleCamera = async () => {
     setMediaNotice('');
+    unlockAudioPlayback();
     if (camOn) {
-      stopLocalMedia();
+      stopVideoTrackOnly();
+      signalingRef.current?.updateMediaState({ camOn: false, screenSharing: false });
       return;
     }
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setMediaNotice('Camera API unavailable in this browser context. Audio/Chat conference mode active.');
+        setMediaNotice(formatMediaDeviceError(null, 'Camera'));
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: micOn });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      if (localVideoTrackRef.current) {
+        localVideoTrackRef.current.stop();
+        localVideoTrackRef.current = null;
       }
+      const videoTrack = await acquireDeviceCameraTrack();
+      if (!videoTrack) {
+        setMediaNotice('No video camera track returned by browser.');
+        return;
+      }
+      localVideoTrackRef.current = videoTrack;
+      setLocalVideoRevision((n) => n + 1);
+      await replaceVideoTrackOnPeers(videoTrack);
       setCamOn(true);
       setScreenSharing(false);
-    } catch {
-      setMediaNotice('Camera permission blocked or no webcam detected. Showing your AMMON verified avatar tile.');
+      signalingRef.current?.updateMediaState({ camOn: true, screenSharing: false });
+    } catch (err) {
+      setMediaNotice(formatMediaDeviceError(err, 'Camera'));
     }
   };
 
   const handleToggleScreenShare = async () => {
     setMediaNotice('');
+    unlockAudioPlayback();
     if (screenSharing) {
-      stopLocalMedia();
+      stopVideoTrackOnly();
+      signalingRef.current?.updateMediaState({ camOn: false, screenSharing: false });
       return;
     }
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        setMediaNotice('Screen sharing is not supported in this browser preview.');
+      if (
+        typeof navigator === 'undefined' ||
+        typeof navigator.mediaDevices?.getDisplayMedia !== 'function'
+      ) {
+        setMediaNotice(
+          'Screen sharing (getDisplayMedia) is not supported on this browser or device.'
+        );
         return;
       }
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: 'always' } as MediaTrackConstraints,
+          audio: false,
+        });
+      } catch (constraintErr) {
+        const errName = (constraintErr as { name?: string } | undefined)?.name;
+        if (errName === 'OverconstrainedError' || errName === 'TypeError') {
+          stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        } else {
+          throw constraintErr;
+        }
       }
+
+      const displayTrack = stream.getVideoTracks()[0];
+      if (!displayTrack) {
+        setMediaNotice('No screen video track was returned.');
+        return;
+      }
+
+      // Stop previous webcam track only after screen selection succeeds
+      if (localVideoTrackRef.current && localVideoTrackRef.current !== displayTrack) {
+        localVideoTrackRef.current.stop();
+      }
+      localVideoTrackRef.current = displayTrack;
+      setLocalVideoRevision((n) => n + 1);
+      await replaceVideoTrackOnPeers(displayTrack);
       setScreenSharing(true);
       setCamOn(false);
-      stream.getVideoTracks()[0].onended = () => {
-        setScreenSharing(false);
+      signalingRef.current?.updateMediaState({ camOn: false, screenSharing: true });
+      displayTrack.onended = () => {
+        if (localVideoTrackRef.current === displayTrack) {
+          stopVideoTrackOnly();
+          signalingRef.current?.updateMediaState({ camOn: false, screenSharing: false });
+        }
       };
-    } catch {
-      setMediaNotice('Screen share cancelled or blocked by browser.');
+    } catch (err) {
+      const domErr = err as { name?: string; message?: string } | undefined;
+      if (domErr?.name === 'NotAllowedError') {
+        setMediaNotice(
+          'Screen sharing permission was cancelled or blocked by the embedded browser frame. Allow screen capture in site settings or open the meeting in a standalone browser tab.'
+        );
+      } else if (domErr?.name === 'AbortError') {
+        setMediaNotice('Screen share selection was cancelled.');
+      } else {
+        setMediaNotice(formatMediaDeviceError(err, 'Screen Sharing'));
+      }
     }
   };
 
@@ -321,36 +1112,47 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     try {
       if (file.type.startsWith('image/')) {
         const compressed = await compressImageFile(file);
-        if (compressed.dataUrl.length > 820000) {
-          setUploadError('Image is still too large after compression. Please select a smaller image.');
-          return;
-        }
-        setPendingAttachment({
-          name: file.name,
-          type: 'image/jpeg',
-          size: compressed.sizeLabel,
-          data: compressed.dataUrl,
-        });
-      } else {
-        if (file.size > 600 * 1024) {
-          setUploadError('Document exceeds 600KB limit for instant chat sync. Please upload a smaller file.');
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const dataUrl = ev.target?.result as string;
-          const sizeLabel = file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`;
+        if (compressed.dataUrl.length <= 820000) {
           setPendingAttachment({
             name: file.name,
-            type: file.type || 'application/octet-stream',
-            size: sizeLabel,
-            data: dataUrl,
+            type: 'image/jpeg',
+            size: compressed.sizeLabel,
+            data: compressed.dataUrl,
           });
-        };
-        reader.readAsDataURL(file);
+          return;
+        }
       }
-    } catch {
-      setUploadError('Unable to read selected file from device.');
+
+      if (isVideoFile(file.name, file.type) || isAudioFile(file.name, file.type) || file.size > 400 * 1024) {
+        setIsUploadingMedia(true);
+        const uploaded = await uploadChatMediaAsset(file, activeChannelId);
+        setPendingAttachment({
+          name: file.name,
+          type: uploaded.contentType,
+          size: uploaded.sizeLabel,
+          data: uploaded.url,
+        });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target?.result as string;
+        const sizeLabel = file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`;
+        setPendingAttachment({
+          name: file.name,
+          type: file.type || 'application/octet-stream',
+          size: sizeLabel,
+          data: dataUrl,
+        });
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setUploadError(
+        err instanceof Error ? err.message : 'Unable to upload selected file from device.'
+      );
+    } finally {
+      setIsUploadingMedia(false);
     }
   };
 
@@ -462,6 +1264,23 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     });
   };
 
+  const primeAudioFromUserGesture = () => {
+    unlockAudioPlayback();
+    setMediaNotice('');
+    setMeetingLobbyNotice('');
+    if (
+      !localAudioTrackRef.current &&
+      !pendingAudioInitRef.current &&
+      typeof navigator !== 'undefined' &&
+      typeof navigator.mediaDevices?.getUserMedia === 'function'
+    ) {
+      pendingAudioInitRef.current = acquireDeviceAudioTrack().catch((err) => {
+        setMediaNotice(formatMediaDeviceError(err, 'Microphone'));
+        return null;
+      });
+    }
+  };
+
   // Meeting handlers
   const handleStartOrScheduleMeeting = (e: React.FormEvent, instantLive: boolean) => {
     e.preventDefault();
@@ -489,11 +1308,14 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     setNewMeetingAgenda('');
     setShowScheduleForm(false);
     if (instantLive) {
+      primeAudioFromUserGesture();
       setActiveMeetingId(id);
     }
   };
 
   const handleJoinMeeting = (mtg: OnlineMeeting) => {
+    if (mtg.status === 'Ended') return;
+    primeAudioFromUserGesture();
     const existingParticipants = Array.isArray(mtg.participants) ? mtg.participants : [];
     const updates: Partial<OnlineMeeting> = {};
     if (!existingParticipants.includes(currentUser.name)) {
@@ -506,12 +1328,390 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
       onUpdateMeeting(mtg.id, updates);
     }
     setActiveMeetingId(mtg.id);
-    setMediaNotice('');
   };
 
-  const handleLeaveMeeting = () => {
-    stopLocalMedia();
+  const handleStartRecording = () => {
+    if (!activeMeeting || !isMeetingHost || isLocalRecording || isUploadingRecording) return;
+    if (typeof MediaRecorder === 'undefined') {
+      setMediaNotice('Session recording (MediaRecorder) is not supported in this browser.');
+      return;
+    }
+
+    setMediaNotice('');
+    setRecordingStatusMessage('');
+
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      const audioDest = audioCtx.createMediaStreamDestination();
+      recordingAudioCtxRef.current = audioCtx;
+      recordingAudioDestRef.current = audioDest;
+      connectedRecordingAudioIdsRef.current.clear();
+
+      // Add a tiny silent oscillator keep-alive so AudioContext track never drops even when everyone mutes
+      const keepAliveOsc = audioCtx.createOscillator();
+      const keepAliveGain = audioCtx.createGain();
+      keepAliveGain.gain.value = 0.00001;
+      keepAliveOsc.connect(keepAliveGain);
+      keepAliveGain.connect(audioDest);
+      keepAliveOsc.start();
+
+      syncAudioTracksToRecorder();
+
+      // Create 1280x720 compositor canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx2d = canvas.getContext('2d');
+      if (!ctx2d) {
+        cleanupRecorderResources();
+        setMediaNotice('Unable to initialize canvas video compositor for recording.');
+        return;
+      }
+
+      const drawCompositeFrame = () => {
+        const snap = liveRecordingStateRef.current;
+        ctx2d.fillStyle = '#0F172A';
+        ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Top AMMON Header Bar
+        ctx2d.fillStyle = '#14532D';
+        ctx2d.fillRect(0, 0, canvas.width, 54);
+        ctx2d.fillStyle = '#FFFFFF';
+        ctx2d.font = 'bold 20px sans-serif';
+        ctx2d.fillText(
+          `AMMON Meeting Recording • ${snap.activeMeeting?.title || 'Live Session'}`,
+          22,
+          34
+        );
+
+        // REC timer badge
+        ctx2d.fillStyle = '#DC2626';
+        ctx2d.fillRect(canvas.width - 155, 12, 134, 30);
+        ctx2d.fillStyle = '#FFFFFF';
+        ctx2d.font = 'bold 16px monospace';
+        ctx2d.fillText(`● REC ${formatRecDuration(recordingSecondsRef.current)}`, canvas.width - 142, 33);
+
+        // Check active screen share (<video> local or remote)
+        const remoteVideos = Array.from(
+          document.querySelectorAll<HTMLVideoElement>('video[data-rtc-peer-video="true"]')
+        );
+        const remoteScreenEl = remoteVideos.find(
+          (v) => v.dataset.screenSharing === 'true' && v.readyState >= 2 && v.videoWidth > 0
+        );
+        const localVideoEl = videoRef.current;
+        const localScreenReady =
+          snap.screenSharing && localVideoEl && localVideoEl.readyState >= 2 && localVideoEl.videoWidth > 0;
+
+        const screenSourceEl = localScreenReady ? localVideoEl : remoteScreenEl;
+        const areaTop = 66;
+        const areaHeight = canvas.height - areaTop - 16;
+        const areaWidth = canvas.width - 32;
+
+        if (screenSourceEl) {
+          // Draw full-stage uncropped shared screen
+          const scale = Math.min(
+            areaWidth / screenSourceEl.videoWidth,
+            areaHeight / screenSourceEl.videoHeight
+          );
+          const drawW = screenSourceEl.videoWidth * scale;
+          const drawH = screenSourceEl.videoHeight * scale;
+          const dx = 16 + (areaWidth - drawW) / 2;
+          const dy = areaTop + (areaHeight - drawH) / 2;
+          ctx2d.fillStyle = '#000000';
+          ctx2d.fillRect(16, areaTop, areaWidth, areaHeight);
+          ctx2d.drawImage(screenSourceEl, dx, dy, drawW, drawH);
+
+          // Presenter label
+          const presenterName = localScreenReady
+            ? `${snap.userName} (Host Screen Share)`
+            : `${remoteScreenEl?.dataset.peerName || 'Participant'} (Screen Share)`;
+          ctx2d.fillStyle = 'rgba(23, 107, 55, 0.9)';
+          ctx2d.fillRect(28, areaTop + 12, 340, 30);
+          ctx2d.fillStyle = '#FFFFFF';
+          ctx2d.font = 'bold 14px sans-serif';
+          ctx2d.fillText(presenterName, 40, areaTop + 32);
+          return;
+        }
+
+        // Participant tiles grid (video feeds + audio-only badges)
+        interface TileItem {
+          label: string;
+          micOn: boolean;
+          videoEl: HTMLVideoElement | null;
+        }
+        const tiles: TileItem[] = [
+          {
+            label: `${snap.userName} (Host)`,
+            micOn: snap.micOn,
+            videoEl:
+              snap.camOn && localVideoEl && localVideoEl.readyState >= 2 && localVideoEl.videoWidth > 0
+                ? localVideoEl
+                : null,
+          },
+        ];
+
+        for (const p of snap.remotePeers) {
+          const matchEl =
+            remoteVideos.find(
+              (v) => v.dataset.peerId === p.peerId && p.camOn && v.readyState >= 2 && v.videoWidth > 0
+            ) || null;
+          tiles.push({
+            label: p.name,
+            micOn: p.micOn,
+            videoEl: matchEl,
+          });
+        }
+
+        const shownTiles = tiles.slice(0, 4);
+        const cols = shownTiles.length <= 1 ? 1 : 2;
+        const rows = shownTiles.length <= 2 ? 1 : 2;
+        const gap = 16;
+        const tileW = (areaWidth - gap * (cols - 1)) / cols;
+        const tileH = (areaHeight - gap * (rows - 1)) / rows;
+
+        shownTiles.forEach((tile, idx) => {
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+          const x = 16 + col * (tileW + gap);
+          const y = areaTop + row * (tileH + gap);
+
+          ctx2d.fillStyle = '#1E293B';
+          ctx2d.fillRect(x, y, tileW, tileH);
+          ctx2d.strokeStyle = '#176B37';
+          ctx2d.lineWidth = 3;
+          ctx2d.strokeRect(x, y, tileW, tileH);
+
+          if (tile.videoEl) {
+            const scale = Math.max(tileW / tile.videoEl.videoWidth, tileH / tile.videoEl.videoHeight);
+            const dw = tile.videoEl.videoWidth * scale;
+            const dh = tile.videoEl.videoHeight * scale;
+            ctx2d.save();
+            ctx2d.beginPath();
+            ctx2d.rect(x, y, tileW, tileH);
+            ctx2d.clip();
+            ctx2d.drawImage(tile.videoEl, x + (tileW - dw) / 2, y + (tileH - dh) / 2, dw, dh);
+            ctx2d.restore();
+          } else {
+            ctx2d.beginPath();
+            ctx2d.arc(x + tileW / 2, y + tileH / 2 - 14, 42, 0, Math.PI * 2);
+            ctx2d.fillStyle = '#176B37';
+            ctx2d.fill();
+            ctx2d.fillStyle = '#FFFFFF';
+            ctx2d.font = 'bold 26px sans-serif';
+            const initials = tile.label
+              .split(' ')
+              .slice(0, 2)
+              .map((w) => w[0] || '')
+              .join('')
+              .toUpperCase();
+            ctx2d.textAlign = 'center';
+            ctx2d.fillText(initials, x + tileW / 2, y + tileH / 2 - 5);
+            ctx2d.textAlign = 'left';
+          }
+
+          ctx2d.fillStyle = 'rgba(0,0,0,0.7)';
+          ctx2d.fillRect(x + 10, y + tileH - 36, Math.min(tileW - 20, 320), 26);
+          ctx2d.fillStyle = tile.micOn ? '#4ADE80' : '#F87171';
+          ctx2d.font = 'bold 13px sans-serif';
+          ctx2d.fillText(`${tile.micOn ? 'MIC' : 'MUTED'} • ${tile.label}`, x + 18, y + tileH - 18);
+        });
+      };
+
+      drawCompositeFrame();
+      recordingDrawTimerRef.current = setInterval(drawCompositeFrame, 50); // 20fps keeps drawing even when tab backgrounded during screen share
+
+      const canvasStream = canvas.captureStream(20);
+      const combinedTracks: MediaStreamTrack[] = [
+        ...canvasStream.getVideoTracks(),
+        ...audioDest.stream.getAudioTracks(),
+      ];
+      const compositeStream = new MediaStream(combinedTracks);
+      recordingCompositeStreamRef.current = compositeStream;
+
+      const mimeCandidates = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4',
+      ];
+      const supportedMime =
+        mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) || '';
+      const recorder = supportedMime
+        ? new MediaRecorder(compositeStream, {
+            mimeType: supportedMime,
+            videoBitsPerSecond: 900_000,
+            audioBitsPerSecond: 64_000,
+          })
+        : new MediaRecorder(compositeStream, {
+            videoBitsPerSecond: 900_000,
+            audioBitsPerSecond: 64_000,
+          });
+
+      recordedChunksRef.current = [];
+      recorder.ondataavailable = (evt) => {
+        if (evt.data && evt.data.size > 0) {
+          recordedChunksRef.current.push(evt.data);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recordingSecondsRef.current = 0;
+      setRecordingSeconds(0);
+      setIsLocalRecording(true);
+      setRemoteRecordingBy(currentUser.name);
+
+      recordingDurationTimerRef.current = setInterval(() => {
+        recordingSecondsRef.current += 1;
+        setRecordingSeconds(recordingSecondsRef.current);
+      }, 1000);
+
+      recorder.start(2500);
+
+      onUpdateMeeting(activeMeeting.id, {
+        isRecording: true,
+        recordingStartedBy: currentUser.name,
+      });
+      signalingRef.current?.sendRecordingState(true, currentUser.name);
+    } catch (err) {
+      cleanupRecorderResources();
+      setIsLocalRecording(false);
+      setMediaNotice(
+        err instanceof Error
+          ? `Unable to start meeting recording: ${err.message}`
+          : 'Unable to start meeting recording in this browser.'
+      );
+    }
+  };
+
+  const stopAndSaveRecording = async (targetMeeting: OnlineMeeting): Promise<void> => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') {
+      cleanupRecorderResources();
+      setIsLocalRecording(false);
+      return;
+    }
+
+    const durationSnap = recordingSecondsRef.current;
+    setIsLocalRecording(false);
+    setRemoteRecordingBy(null);
+    setIsUploadingRecording(true);
+    setRecordingUploadPct(5);
+
+    signalingRef.current?.sendRecordingState(false, currentUser.name);
+
+    const blob = await new Promise<Blob>((resolve) => {
+      recorder.onstop = () => {
+        const mime = recorder.mimeType || 'video/webm';
+        resolve(new Blob(recordedChunksRef.current, { type: mime }));
+      };
+      try {
+        recorder.stop();
+      } catch {
+        resolve(new Blob(recordedChunksRef.current, { type: 'video/webm' }));
+      }
+    });
+
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+    cleanupRecorderResources();
+
+    if (!blob.size) {
+      setIsUploadingRecording(false);
+      setRecordingUploadPct(0);
+      setMediaNotice('Recording stopped before any video frames were captured.');
+      onUpdateMeeting(targetMeeting.id, { isRecording: false, recordingStartedBy: '' });
+      return;
+    }
+
+    try {
+      const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+      const safeTitle = targetMeeting.title
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 40) || 'ammon_meeting';
+      const uploadRes = await uploadMeetingRecordingAsset({
+        blob,
+        meetingId: targetMeeting.id,
+        fileName: `${safeTitle}_${targetMeeting.meetingCode}.${ext}`,
+        mimeType: blob.type || `video/${ext}`,
+        meetingTitle: targetMeeting.title,
+        recordedBy: currentUser.name,
+        onProgress: (pct) => setRecordingUploadPct(pct),
+      });
+
+      const newRecording: MeetingRecording = {
+        id: `rec-${Date.now()}`,
+        title: `${targetMeeting.title} — Session Recording`,
+        url: uploadRes.url,
+        storagePath: uploadRes.storagePath,
+        bucketName: uploadRes.bucketName,
+        mimeType: uploadRes.mimeType,
+        sizeLabel: uploadRes.sizeLabel,
+        durationLabel: formatRecDuration(durationSnap),
+        recordedBy: currentUser.name,
+        recordedAt: new Date().toLocaleString([], {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
+        createdAtMs: Date.now(),
+      };
+
+      const existingRecs = Array.isArray(targetMeeting.recordings)
+        ? targetMeeting.recordings
+        : [];
+
+      onUpdateMeeting(targetMeeting.id, {
+        recordings: [newRecording, ...existingRecs],
+        isRecording: false,
+        recordingStartedBy: '',
+      });
+
+      const destLabel =
+        uploadRes.provider === 'firebase-storage'
+          ? `AMMON Firebase Storage (${uploadRes.bucketName}/${uploadRes.storagePath})`
+          : `AMMON Persistent Media Vault (${uploadRes.storagePath})`;
+      setRecordingStatusMessage(
+        `Session video (${newRecording.sizeLabel}, ${newRecording.durationLabel}) saved to ${destLabel} for absent members.`
+      );
+    } catch (err) {
+      onUpdateMeeting(targetMeeting.id, { isRecording: false, recordingStartedBy: '' });
+      setMediaNotice(
+        err instanceof Error
+          ? err.message
+          : 'Failed to upload recorded session video to AMMON Firebase Storage.'
+      );
+    } finally {
+      setIsUploadingRecording(false);
+      setRecordingUploadPct(0);
+      setRecordingSeconds(0);
+    }
+  };
+
+  const handleLeaveMeeting = async () => {
+    if (isLocalRecording && activeMeeting) {
+      await stopAndSaveRecording(activeMeeting);
+    }
+    stopAllLocalMediaAndRtc();
     setActiveMeetingId(null);
+  };
+
+  const handleEndMeeting = async (mtg: OnlineMeeting) => {
+    if (!isUserMeetingHost(mtg)) return;
+    if (isLocalRecording && activeMeeting?.id === mtg.id) {
+      await stopAndSaveRecording(mtg);
+    }
+    signalingRef.current?.endMeeting(currentUser.name);
+    onUpdateMeeting(mtg.id, { status: 'Ended', isRecording: false, recordingStartedBy: '' });
+    stopAllLocalMediaAndRtc();
+    setActiveMeetingId(null);
+    setMeetingLobbyNotice(
+      `Meeting "${mtg.title}" has been concluded by host (${currentUser.name}). Any saved recordings remain available below for members who could not attend.`
+    );
   };
 
   const handleToggleRaiseHand = (mtg: OnlineMeeting) => {
@@ -519,6 +1719,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     const isRaised = hands.includes(currentUser.name);
     const updated = isRaised ? hands.filter((n) => n !== currentUser.name) : [...hands, currentUser.name];
     onUpdateMeeting(mtg.id, { raisedHands: updated });
+    signalingRef.current?.updateMediaState({ handRaised: !isRaised });
   };
 
   const filteredChannels = SOCIAL_CHANNELS.filter(
@@ -795,16 +1996,17 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                         </div>
                       )}
 
-                      {/* Device Attachment Preview */}
+                      {/* Device Attachment Preview: Images, Videos, Audio & Documents */}
                       {msg.attachmentData && msg.attachmentType?.startsWith('image/') && (
                         <div className="mb-2 rounded-xl overflow-hidden border border-black/10 bg-white">
                           <img
                             src={msg.attachmentData}
                             alt={msg.attachmentName || 'Uploaded image'}
                             onClick={() =>
-                              setPreviewImage({
+                              setPreviewMedia({
                                 src: msg.attachmentData!,
                                 name: msg.attachmentName || 'image.jpg',
+                                kind: 'image',
                               })
                             }
                             className="max-h-60 w-full object-cover cursor-pointer hover:opacity-95 transition-opacity"
@@ -812,24 +2014,95 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                         </div>
                       )}
 
-                      {msg.attachmentData && !msg.attachmentType?.startsWith('image/') && (
-                        <a
-                          href={msg.attachmentData}
-                          download={msg.attachmentName || 'attachment'}
-                          className="mb-2 p-2.5 rounded-xl bg-white/90 border border-[#E5E7EB] flex items-center justify-between gap-3 hover:bg-white transition-colors"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-8 h-8 rounded-lg bg-[#EAF3ED] text-[#176B37] flex items-center justify-center shrink-0">
-                              <FileText className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-bold text-xs text-[#252525] truncate">{msg.attachmentName}</p>
-                              <p className="text-[10px] text-gray-400">{msg.attachmentSize || 'Document'}</p>
+                      {msg.attachmentData &&
+                        isVideoFile(msg.attachmentName, msg.attachmentType) && (
+                          <div className="mb-2 rounded-xl overflow-hidden border border-black/15 bg-black shadow-xs">
+                            <video
+                              src={msg.attachmentData}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="w-full max-h-72 bg-black object-contain"
+                            />
+                            <div className="px-2.5 py-1.5 bg-slate-900/95 text-white flex items-center justify-between gap-2 text-[11px]">
+                              <span className="truncate font-semibold flex items-center gap-1.5 min-w-0">
+                                <Film className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <span className="truncate">{msg.attachmentName || 'Video clip'}</span>
+                                {msg.attachmentSize && (
+                                  <span className="text-slate-400 shrink-0">({msg.attachmentSize})</span>
+                                )}
+                              </span>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPreviewMedia({
+                                      src: msg.attachmentData!,
+                                      name: msg.attachmentName || 'video.mp4',
+                                      kind: 'video',
+                                    })
+                                  }
+                                  className="text-emerald-300 hover:text-white font-bold flex items-center gap-1 cursor-pointer"
+                                  title="Expand video player"
+                                >
+                                  <Maximize2 className="w-3.5 h-3.5" />
+                                  <span>Expand</span>
+                                </button>
+                                <a
+                                  href={msg.attachmentData}
+                                  download={msg.attachmentName || 'video.mp4'}
+                                  className="text-slate-300 hover:text-white"
+                                  title="Download video"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </a>
+                              </div>
                             </div>
                           </div>
-                          <Download className="w-4 h-4 text-[#176B37] shrink-0" />
-                        </a>
-                      )}
+                        )}
+
+                      {msg.attachmentData &&
+                        isAudioFile(msg.attachmentName, msg.attachmentType) && (
+                          <div className="mb-2 p-2.5 rounded-xl bg-white/95 border border-[#E5E7EB] space-y-1.5">
+                            <div className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="font-bold text-[#14532D] truncate flex items-center gap-1.5">
+                                <Volume2 className="w-3.5 h-3.5 text-[#176B37] shrink-0" />
+                                <span className="truncate">{msg.attachmentName || 'Audio clip'}</span>
+                              </span>
+                              {msg.attachmentSize && (
+                                <span className="text-gray-400 shrink-0">{msg.attachmentSize}</span>
+                              )}
+                            </div>
+                            <audio
+                              src={msg.attachmentData}
+                              controls
+                              preload="metadata"
+                              className="w-full h-9"
+                            />
+                          </div>
+                        )}
+
+                      {msg.attachmentData &&
+                        !msg.attachmentType?.startsWith('image/') &&
+                        !isVideoFile(msg.attachmentName, msg.attachmentType) &&
+                        !isAudioFile(msg.attachmentName, msg.attachmentType) && (
+                          <a
+                            href={msg.attachmentData}
+                            download={msg.attachmentName || 'attachment'}
+                            className="mb-2 p-2.5 rounded-xl bg-white/90 border border-[#E5E7EB] flex items-center justify-between gap-3 hover:bg-white transition-colors"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="w-8 h-8 rounded-lg bg-[#EAF3ED] text-[#176B37] flex items-center justify-center shrink-0">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-bold text-xs text-[#252525] truncate">{msg.attachmentName}</p>
+                                <p className="text-[10px] text-gray-400">{msg.attachmentSize || 'Document'}</p>
+                              </div>
+                            </div>
+                            <Download className="w-4 h-4 text-[#176B37] shrink-0" />
+                          </a>
+                        )}
 
                       {/* Message Text with @Tag Highlighting */}
                       <p className="text-xs sm:text-[13px] text-[#252525] leading-relaxed whitespace-pre-wrap break-words">
@@ -1017,6 +2290,14 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                 </div>
               )}
 
+              {/* Uploading Media Progress Indicator */}
+              {isUploadingMedia && (
+                <div className="mb-2 px-3 py-2 rounded-xl bg-emerald-50 border border-[#176B37]/30 text-[#14532D] text-xs font-semibold flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#176B37]" />
+                  <span>Uploading media file to AMMON vault...</span>
+                </div>
+              )}
+
               {/* Pending Device Upload Preview */}
               {pendingAttachment && (
                 <div className="mb-2 p-2 rounded-xl bg-white border border-[#176B37]/30 flex items-center justify-between gap-3 text-xs">
@@ -1026,6 +2307,14 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                         src={pendingAttachment.data}
                         alt="Preview"
                         className="w-10 h-10 rounded-lg object-cover shrink-0 border border-gray-200"
+                      />
+                    ) : isVideoFile(pendingAttachment.name, pendingAttachment.type) ? (
+                      <video
+                        src={pendingAttachment.data}
+                        muted
+                        playsInline
+                        controls
+                        className="w-20 h-12 rounded-lg object-cover bg-black shrink-0 border border-gray-200"
                       />
                     ) : (
                       <div className="w-10 h-10 rounded-lg bg-[#EAF3ED] text-[#176B37] flex items-center justify-center shrink-0">
@@ -1060,15 +2349,29 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                   <Smile className="w-5 h-5" />
                 </button>
 
-                {/* Upload from Device (Images & Documents) */}
+                {/* Upload from Device (Videos, Photos, Audio & Documents) */}
                 <label
                   className="p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
-                  title="Upload photo or document from device"
+                  title="Upload photo, video, audio or document from device"
                 >
                   <Paperclip className="w-5 h-5" />
                   <input
                     type="file"
-                    accept="image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
+                    className="hidden"
+                    onChange={handleDeviceUpload}
+                  />
+                </label>
+
+                {/* Quick Video Upload from Device */}
+                <label
+                  className="p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
+                  title="Upload video from device (MP4, WebM, MOV up to 25MB)"
+                >
+                  <Film className="w-5 h-5" />
+                  <input
+                    type="file"
+                    accept="video/*"
                     className="hidden"
                     onChange={handleDeviceUpload}
                   />
@@ -1136,7 +2439,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -1150,6 +2453,18 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                     <span>{copiedMeetCode ? 'Invite Copied' : 'Copy Invite'}</span>
                   </button>
 
+                  {isMeetingHost && (
+                    <button
+                      type="button"
+                      onClick={() => handleEndMeeting(activeMeeting)}
+                      className="px-3.5 py-1.5 rounded-xl bg-rose-700 hover:bg-rose-800 border border-rose-300/40 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="End meeting for all participants (Host only)"
+                    >
+                      <Power className="w-3.5 h-3.5" />
+                      <span>End Meeting</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleLeaveMeeting}
@@ -1162,8 +2477,75 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
               </div>
 
               {mediaNotice && (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium">
-                  {mediaNotice}
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium flex flex-wrap items-center justify-between gap-2">
+                  <span>{mediaNotice}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!micOn && (
+                      <button
+                        type="button"
+                        onClick={handleToggleMic}
+                        className="px-2.5 py-1 rounded-lg bg-[#176B37] text-white font-bold cursor-pointer"
+                      >
+                        Retry Mic
+                      </button>
+                    )}
+                    {!camOn && (
+                      <button
+                        type="button"
+                        onClick={handleToggleCamera}
+                        className="px-2.5 py-1 rounded-lg bg-[#14532D] text-white font-bold cursor-pointer"
+                      >
+                        Retry Camera
+                      </button>
+                    )}
+                    <button type="button" onClick={() => setMediaNotice('')} className="cursor-pointer">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {audioPlaybackBlocked && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-[#176B37]/30 text-[#14532D] text-xs font-semibold flex flex-wrap items-center justify-between gap-2">
+                  <span>Browser blocked automatic speaker playback for remote members. Tap below to hear live audio:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSpeakerOn(true);
+                      setAudioPlaybackBlocked(false);
+                      document.querySelectorAll<HTMLAudioElement>('audio[data-rtc-remote]').forEach((el) => {
+                        el.muted = false;
+                        el.play().catch(() => {});
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-[#176B37] text-white font-bold cursor-pointer"
+                  >
+                    Enable Live Audio
+                  </button>
+                </div>
+              )}
+
+              {isUploadingRecording && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-[#176B37]/40 text-[#14532D] text-xs font-semibold flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#176B37]" />
+                    <span>
+                      Saving recorded session video to AMMON Firebase Storage bucket ({recordingUploadPct}%)...
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              {recordingStatusMessage && (
+                <div className="p-3 rounded-xl bg-[#EAF3ED] border border-[#176B37]/30 text-[#14532D] text-xs font-semibold flex items-center justify-between gap-2">
+                  <span>{recordingStatusMessage}</span>
+                  <button
+                    type="button"
+                    onClick={() => setRecordingStatusMessage('')}
+                    className="cursor-pointer shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               )}
 
@@ -1171,18 +2553,82 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                 {/* Left 8 Cols: Video Grid & Controls */}
                 <div className="lg:col-span-8 space-y-3">
+                  {/* Live Transport & Recording Status Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-white border border-[#E5E7EB] text-[11px]">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="flex items-center gap-1.5 font-semibold text-[#14532D]">
+                        <Wifi className="w-3.5 h-3.5 text-[#176B37]" />
+                        <span>
+                          Live Audio/Video Mesh:{' '}
+                          {rtcTransportMode === 'websocket'
+                            ? 'Real-Time WebSocket Connected'
+                            : rtcTransportMode === 'firestore'
+                            ? 'Cloud Sync Connected'
+                            : 'Connecting...'}
+                        </span>
+                      </span>
+
+                      {(isLocalRecording || activeMeeting.isRecording || remoteRecordingBy) && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-600 text-white font-extrabold text-[10px] tracking-wide">
+                          <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                          <span>
+                            {isLocalRecording
+                              ? `RECORDING • ${formatRecDuration(recordingSeconds)}`
+                              : `REC LIVE (${activeMeeting.recordingStartedBy || remoteRecordingBy || 'Host'})`}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-gray-500 font-medium">
+                      {remotePeers.length + 1} Active in Live Audio Room
+                    </span>
+                  </div>
+
+                  {/* Active Screen-Sharing Indicator Banner + Broadcaster-only Stop Sharing button */}
+                  {(screenSharing || remotePeers.some((p) => p.screenSharing)) && (() => {
+                    const remotePresenter = remotePeers.find((p) => p.screenSharing);
+                    return (
+                      <div className="px-3.5 py-2.5 rounded-xl bg-emerald-950 text-white border border-emerald-500/50 flex flex-wrap items-center justify-between gap-2 shadow-xs">
+                        <div className="flex items-center gap-2 text-xs font-bold min-w-0">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                          <MonitorUp className="w-4 h-4 text-emerald-300 shrink-0" />
+                          <span className="truncate">
+                            {screenSharing
+                              ? 'Screen Sharing Active: You are broadcasting your screen to all participants'
+                              : `Screen Sharing Active: ${remotePresenter?.name || 'A participant'} is sharing their screen`}
+                          </span>
+                        </div>
+                        {screenSharing && (
+                          <button
+                            type="button"
+                            onClick={handleToggleScreenShare}
+                            className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                          >
+                            <Square className="w-3 h-3 fill-white" />
+                            <span>Stop Sharing</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Your Live Video / Avatar Tile */}
-                    <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-16/10 border-2 border-[#176B37] flex items-center justify-center">
-                      {camOn || screenSharing ? (
-                        <video
-                          ref={videoRef}
-                          autoPlay
-                          muted
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
+                    {/* Your Live Video / Screen Share / Avatar Tile */}
+                    <div
+                      className={`relative rounded-2xl overflow-hidden bg-slate-900 border-2 border-[#176B37] flex items-center justify-center ${
+                        screenSharing ? 'sm:col-span-2 aspect-16/9 bg-black' : 'aspect-16/10'
+                      }`}
+                    >
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className={`w-full h-full ${
+                          screenSharing ? 'object-contain bg-black' : 'object-cover'
+                        } ${camOn || screenSharing ? 'block' : 'hidden'}`}
+                      />
+                      {!camOn && !screenSharing && (
                         <div className="flex flex-col items-center justify-center text-center p-4">
                           <div className="w-16 h-16 rounded-full bg-[#176B37] text-white font-black text-xl flex items-center justify-center border-2 border-emerald-300">
                             {currentUser.name
@@ -1193,15 +2639,31 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                           </div>
                           <p className="text-white font-bold text-xs mt-2">{currentUser.name} (You)</p>
                           <p className="text-emerald-300 text-[10px]">
-                            {micOn ? 'Microphone Active' : 'Muted'} • Camera Off
+                            {micOn ? 'Microphone Active' : 'Mic Muted'} • Camera Off
                           </p>
                         </div>
                       )}
-                      <div className="absolute bottom-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-black/60 text-white text-[11px] font-semibold flex items-center gap-1.5">
+                      {screenSharing && (
+                        <>
+                          <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-[#176B37] text-white text-[10px] font-extrabold flex items-center gap-1.5 shadow-sm">
+                            <MonitorUp className="w-3 h-3 text-emerald-200" />
+                            <span>Broadcasting Your Screen</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleToggleScreenShare}
+                            className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full bg-red-600 hover:bg-red-700 text-white text-[10px] font-extrabold flex items-center gap-1 cursor-pointer shadow-sm"
+                          >
+                            <Square className="w-2.5 h-2.5 fill-white" />
+                            <span>Stop Sharing</span>
+                          </button>
+                        </>
+                      )}
+                      <div className="absolute bottom-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-black/65 text-white text-[11px] font-semibold flex items-center gap-1.5">
                         {micOn ? <Mic className="w-3 h-3 text-emerald-400" /> : <MicOff className="w-3 h-3 text-red-400" />}
-                        <span>{currentUser.name}</span>
+                        <span>{currentUser.name} (You)</span>
                       </div>
-                      {(activeMeeting.raisedHands || []).includes(currentUser.name) && (
+                      {!screenSharing && (activeMeeting.raisedHands || []).includes(currentUser.name) && (
                         <div className="absolute top-2.5 right-2.5 px-2 py-1 rounded-full bg-amber-400 text-slate-900 text-[10px] font-extrabold flex items-center gap-1">
                           <Hand className="w-3 h-3" />
                           <span>Hand Raised</span>
@@ -1209,10 +2671,27 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                       )}
                     </div>
 
-                    {/* Host / Co-Participants Tiles */}
+                    {/* Connected Remote WebRTC Peers (Live Audio + Video) */}
+                    {remotePeers.map((peer) => (
+                      <RemotePeerTile
+                        key={peer.peerId}
+                        peer={peer}
+                        remoteStream={remoteStreams[peer.peerId]}
+                        connState={peerConnStates[peer.peerId]}
+                        isHost={peer.name === activeMeeting.hostName}
+                        speakerOn={speakerOn}
+                        onPlaybackBlocked={() => setAudioPlaybackBlocked(true)}
+                      />
+                    ))}
+
+                    {/* Directory Co-Participants who haven't opened audio room yet */}
                     {(activeMeeting.participants || [])
-                      .filter((p) => p !== currentUser.name)
-                      .slice(0, 3)
+                      .filter(
+                        (p) =>
+                          p !== currentUser.name &&
+                          !remotePeers.some((rp) => rp.name === p)
+                      )
+                      .slice(0, Math.max(0, 3 - remotePeers.length))
                       .map((participant) => {
                         const isHost = participant === activeMeeting.hostName;
                         const handUp = (activeMeeting.raisedHands || []).includes(participant);
@@ -1231,8 +2710,8 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                             <p className="text-white font-bold text-xs mt-2 text-center truncate max-w-full">
                               {participant}
                             </p>
-                            <span className="text-[10px] text-emerald-300">
-                              {isHost ? 'Meeting Host' : 'Connected Operator'}
+                            <span className="text-[10px] text-slate-300">
+                              {isHost ? 'Meeting Host' : 'In Lobby / Audio Standby'}
                             </span>
                             {handUp && (
                               <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold flex items-center gap-1">
@@ -1249,13 +2728,13 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                   <div className="bg-white p-3 rounded-2xl border border-[#E5E7EB] flex flex-wrap items-center justify-center gap-2.5 shadow-xs">
                     <button
                       type="button"
-                      onClick={() => setMicOn(!micOn)}
+                      onClick={handleToggleMic}
                       className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
                         micOn ? 'bg-[#EAF3ED] text-[#176B37]' : 'bg-red-50 text-red-600 border border-red-200'
                       }`}
                     >
                       {micOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-                      <span>{micOn ? 'Mic On' : 'Muted'}</span>
+                      <span>{micOn ? 'Mute Mic' : 'Unmute Mic'}</span>
                     </button>
 
                     <button
@@ -1266,18 +2745,32 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                       }`}
                     >
                       {camOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
-                      <span>{camOn ? 'Camera On' : 'Start Camera'}</span>
+                      <span>{camOn ? 'Turn Camera Off' : 'Turn Camera On'}</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={handleToggleScreenShare}
                       className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
-                        screenSharing ? 'bg-[#176B37] text-white' : 'bg-gray-100 text-gray-700 hover:bg-[#EAF3ED] hover:text-[#176B37]'
+                        screenSharing
+                          ? 'bg-red-600 hover:bg-red-700 text-white shadow-xs'
+                          : 'bg-gray-100 text-gray-700 hover:bg-[#EAF3ED] hover:text-[#176B37]'
                       }`}
                     >
                       <MonitorUp className="w-4 h-4" />
-                      <span>{screenSharing ? 'Sharing Screen' : 'Share Screen'}</span>
+                      <span>{screenSharing ? 'Stop Sharing' : 'Share Screen'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSpeakerOn(!speakerOn)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                        speakerOn ? 'bg-[#EAF3ED] text-[#176B37]' : 'bg-red-50 text-red-600 border border-red-200'
+                      }`}
+                      title="Toggle incoming audio from other participants"
+                    >
+                      {speakerOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                      <span>{speakerOn ? 'Speaker On' : 'Speaker Muted'}</span>
                     </button>
 
                     <button
@@ -1292,7 +2785,104 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                       <Hand className="w-4 h-4" />
                       <span>Raise Hand</span>
                     </button>
+
+                    {isMeetingHost && (
+                      <button
+                        type="button"
+                        disabled={isUploadingRecording}
+                        onClick={() =>
+                          isLocalRecording
+                            ? stopAndSaveRecording(activeMeeting)
+                            : handleStartRecording()
+                        }
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs ${
+                          isUploadingRecording
+                            ? 'bg-gray-200 text-gray-500 cursor-wait'
+                            : isLocalRecording
+                            ? 'bg-red-600 hover:bg-red-700 text-white cursor-pointer animate-pulse'
+                            : 'bg-[#14532D] hover:bg-[#176B37] text-white cursor-pointer'
+                        }`}
+                        title="Record meeting video & save to AMMON Firebase Storage for absent members (Host only)"
+                      >
+                        {isUploadingRecording ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : isLocalRecording ? (
+                          <Square className="w-3.5 h-3.5 fill-white" />
+                        ) : (
+                          <Disc className="w-4 h-4 text-rose-300" />
+                        )}
+                        <span>
+                          {isUploadingRecording
+                            ? `Saving ${recordingUploadPct}%`
+                            : isLocalRecording
+                            ? `Stop Recording (${formatRecDuration(recordingSeconds)})`
+                            : 'Record Session'}
+                        </span>
+                      </button>
+                    )}
+
+                    {isMeetingHost && (
+                      <button
+                        type="button"
+                        disabled={isUploadingRecording}
+                        onClick={() => handleEndMeeting(activeMeeting)}
+                        className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
+                        title="End meeting for all participants (Host only)"
+                      >
+                        <Power className="w-4 h-4" />
+                        <span>End Meeting</span>
+                      </button>
+                    )}
                   </div>
+
+                  {/* Saved Recordings in Current Session (Playable immediately when saved) */}
+                  {(activeMeeting.recordings || []).length > 0 && (
+                    <div className="bg-white p-4 rounded-2xl border border-[#176B37]/30 space-y-2.5">
+                      <h5 className="font-bold text-xs uppercase tracking-wider text-[#176B37] flex items-center gap-1.5">
+                        <Film className="w-4 h-4" />
+                        <span>Saved Session Recordings ({activeMeeting.recordings!.length})</span>
+                      </h5>
+                      <div className="space-y-2">
+                        {activeMeeting.recordings!.map((rec) => (
+                          <div
+                            key={rec.id}
+                            className="p-2.5 rounded-xl bg-[#F9FBFA] border border-[#E5E7EB] flex flex-wrap items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-bold text-[#252525] truncate">{rec.title}</p>
+                              <p className="text-[10px] text-gray-500">
+                                {rec.durationLabel} • {rec.sizeLabel} • Saved by {rec.recordedBy} ({rec.recordedAt})
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreviewMedia({
+                                    src: rec.url,
+                                    name: `${rec.title} (${rec.durationLabel})`,
+                                    kind: 'video',
+                                  })
+                                }
+                                className="px-2.5 py-1 rounded-lg bg-[#176B37] hover:bg-[#14532D] text-white font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Play className="w-3 h-3 fill-white" />
+                                <span>Watch</span>
+                              </button>
+                              <a
+                                href={rec.url}
+                                download={`${rec.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.webm`}
+                                className="px-2.5 py-1 rounded-lg border border-[#E5E7EB] text-gray-700 hover:bg-gray-100 font-semibold flex items-center gap-1"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>Save</span>
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Meeting Agenda Box */}
                   <div className="bg-white p-4 rounded-2xl border border-[#E5E7EB]">
@@ -1458,23 +3048,44 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                 </form>
               )}
 
+              {meetingLobbyNotice && (
+                <div className="p-3.5 rounded-2xl bg-[#EAF3ED] border border-[#176B37]/30 text-[#14532D] text-xs font-semibold flex items-center justify-between gap-2">
+                  <span>{meetingLobbyNotice}</span>
+                  <button
+                    type="button"
+                    onClick={() => setMeetingLobbyNotice('')}
+                    className="p-1 text-[#176B37] hover:text-[#14532D] cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               {/* Meetings Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {meetings.map((mtg) => {
                   const isLive = mtg.status === 'Live';
+                  const isEnded = mtg.status === 'Ended';
+                  const isCardHost = isUserMeetingHost(mtg);
                   return (
                     <div
                       key={mtg.id}
                       className={`bg-white rounded-2xl border p-5 flex flex-col justify-between gap-4 shadow-xs ${
-                        isLive ? 'border-[#176B37] ring-1 ring-[#176B37]/20' : 'border-[#E5E7EB]'
+                        isLive
+                          ? 'border-[#176B37] ring-1 ring-[#176B37]/20'
+                          : isEnded
+                          ? 'border-gray-200 opacity-80'
+                          : 'border-[#E5E7EB]'
                       }`}
                     >
-                      <div className="space-y-2.5">
+                      <div className="space-y-3">
                         <div className="flex items-center justify-between gap-2">
                           <span
                             className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase flex items-center gap-1 ${
                               isLive
                                 ? 'bg-red-50 text-red-700 border border-red-200'
+                                : isEnded
+                                ? 'bg-gray-100 text-gray-600 border border-gray-200'
                                 : 'bg-[#EAF3ED] text-[#176B37]'
                             }`}
                           >
@@ -1505,20 +3116,92 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                             <span>{(mtg.participants || []).length} registered participants</span>
                           </p>
                         </div>
+
+                        {/* Recorded Session Replay Links for Members Who Missed the Meeting */}
+                        {Array.isArray(mtg.recordings) && mtg.recordings.length > 0 && (
+                          <div className="pt-2 border-t border-gray-100 space-y-1.5">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#176B37] flex items-center gap-1">
+                              <Film className="w-3 h-3" />
+                              <span>Recorded Sessions ({mtg.recordings.length})</span>
+                            </p>
+                            {mtg.recordings.slice(0, 3).map((rec) => (
+                              <div
+                                key={rec.id}
+                                className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#EAF3ED]/50 border border-[#176B37]/20 text-[11px]"
+                              >
+                                <div className="min-w-0">
+                                  <p className="font-bold text-[#14532D] truncate">
+                                    Replay • {rec.durationLabel}
+                                  </p>
+                                  <p className="text-[10px] text-gray-500 truncate">
+                                    {rec.sizeLabel} • {rec.recordedAt}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPreviewMedia({
+                                        src: rec.url,
+                                        name: `${rec.title} (${rec.durationLabel})`,
+                                        kind: 'video',
+                                      })
+                                    }
+                                    className="px-2 py-1 rounded-lg bg-[#176B37] hover:bg-[#14532D] text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Play className="w-2.5 h-2.5 fill-white" />
+                                    <span>Watch</span>
+                                  </button>
+                                  <a
+                                    href={rec.url}
+                                    download={`${mtg.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.webm`}
+                                    className="p-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:text-[#176B37]"
+                                    title="Download session video"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                  </a>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleJoinMeeting(mtg)}
-                        className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                          isLive
-                            ? 'bg-[#176B37] hover:bg-[#14532D] text-white'
-                            : 'bg-[#EAF3ED] hover:bg-[#176B37] text-[#176B37] hover:text-white'
-                        }`}
-                      >
-                        <Video className="w-4 h-4" />
-                        <span>{isLive ? 'Join Live Meeting Room' : 'Enter / Start Meeting'}</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isEnded}
+                          onClick={() => handleJoinMeeting(mtg)}
+                          className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                            isEnded
+                              ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                              : isLive
+                              ? 'bg-[#176B37] hover:bg-[#14532D] text-white cursor-pointer'
+                              : 'bg-[#EAF3ED] hover:bg-[#176B37] text-[#176B37] hover:text-white cursor-pointer'
+                          }`}
+                        >
+                          <Video className="w-4 h-4" />
+                          <span>
+                            {isEnded
+                              ? 'Meeting Ended'
+                              : isLive
+                              ? 'Join Live Meeting Room'
+                              : 'Enter / Start Meeting'}
+                          </span>
+                        </button>
+
+                        {isLive && isCardHost && (
+                          <button
+                            type="button"
+                            onClick={() => handleEndMeeting(mtg)}
+                            className="p-2.5 rounded-xl bg-red-50 hover:bg-red-600 text-red-600 hover:text-white border border-red-200 transition-colors cursor-pointer shrink-0"
+                            title="End Meeting (Host Only)"
+                            aria-label="End Meeting"
+                          >
+                            <Power className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -1528,19 +3211,22 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
         </div>
       )}
 
-      {/* Lightbox Image Preview */}
-      {previewImage && (
+      {/* Lightbox Media Preview (Images & Video Player) */}
+      {previewMedia && (
         <div
-          onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreviewMedia(null)}
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
         >
-          <div className="relative max-w-3xl max-h-[88vh] bg-white rounded-2xl overflow-hidden p-2" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="relative max-w-4xl w-full max-h-[90vh] bg-white rounded-2xl overflow-hidden p-2 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
-              <span className="font-bold text-xs text-[#252525] truncate">{previewImage.name}</span>
-              <div className="flex items-center gap-2">
+              <span className="font-bold text-xs text-[#252525] truncate">{previewMedia.name}</span>
+              <div className="flex items-center gap-2 shrink-0">
                 <a
-                  href={previewImage.src}
-                  download={previewImage.name}
+                  href={previewMedia.src}
+                  download={previewMedia.name}
                   className="px-3 py-1 rounded-lg bg-[#176B37] text-white text-xs font-bold flex items-center gap-1"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -1548,15 +3234,143 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                 </a>
                 <button
                   type="button"
-                  onClick={() => setPreviewImage(null)}
+                  onClick={() => setPreviewMedia(null)}
                   className="p-1 text-gray-500 hover:text-gray-800 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
-            <img src={previewImage.src} alt={previewImage.name} className="max-h-[75vh] w-auto mx-auto object-contain rounded-lg mt-2" />
+            {previewMedia.kind === 'video' ? (
+              <video
+                src={previewMedia.src}
+                controls
+                autoPlay
+                playsInline
+                className="max-h-[76vh] w-full bg-black rounded-lg mt-2"
+              />
+            ) : (
+              <img
+                src={previewMedia.src}
+                alt={previewMedia.name}
+                className="max-h-[75vh] w-auto mx-auto object-contain rounded-lg mt-2"
+              />
+            )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface RemotePeerTileProps {
+  peer: RtcPeerInfo;
+  remoteStream?: MediaStream;
+  connState?: string;
+  isHost: boolean;
+  speakerOn: boolean;
+  onPlaybackBlocked: () => void;
+}
+
+const RemotePeerTile: React.FC<RemotePeerTileProps> = ({
+  peer,
+  remoteStream,
+  connState,
+  isHost,
+  speakerOn,
+  onPlaybackBlocked,
+}) => {
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const onPlaybackBlockedRef = useRef(onPlaybackBlocked);
+  onPlaybackBlockedRef.current = onPlaybackBlocked;
+
+  useEffect(() => {
+    const audioEl = remoteAudioRef.current;
+    if (audioEl && remoteStream) {
+      if (audioEl.srcObject !== remoteStream) {
+        audioEl.srcObject = remoteStream;
+      }
+      audioEl.muted = !speakerOn;
+      audioEl.volume = 1;
+      audioEl.play().catch(() => {
+        onPlaybackBlockedRef.current();
+      });
+    }
+  }, [remoteStream, speakerOn]);
+
+  useEffect(() => {
+    const videoEl = remoteVideoRef.current;
+    if (videoEl && remoteStream && (peer.camOn || peer.screenSharing)) {
+      if (videoEl.srcObject !== remoteStream) {
+        videoEl.srcObject = remoteStream;
+      }
+      videoEl.play().catch(() => {});
+    }
+  }, [remoteStream, peer.camOn, peer.screenSharing]);
+
+  const showVideo = Boolean(remoteStream && (peer.camOn || peer.screenSharing));
+
+  return (
+    <div
+      className={`relative rounded-2xl overflow-hidden bg-slate-800 border border-emerald-500/40 flex flex-col items-center justify-center ${
+        peer.screenSharing ? 'sm:col-span-2 aspect-16/9 bg-black' : 'aspect-16/10'
+      }`}
+    >
+      {/* Persistent audio element so remote member voice plays reliably */}
+      <audio ref={remoteAudioRef} data-rtc-remote="true" autoPlay playsInline className="hidden" />
+
+      <video
+        ref={remoteVideoRef}
+        data-rtc-peer-video="true"
+        data-peer-id={peer.peerId}
+        data-peer-name={peer.name}
+        data-screen-sharing={peer.screenSharing ? 'true' : 'false'}
+        autoPlay
+        muted
+        playsInline
+        className={`w-full h-full ${
+          peer.screenSharing ? 'object-contain bg-black' : 'object-cover'
+        } ${showVideo ? 'block' : 'hidden'}`}
+      />
+
+      {peer.screenSharing && showVideo && (
+        <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full bg-[#176B37] text-white text-[10px] font-extrabold flex items-center gap-1.5 shadow-sm">
+          <MonitorUp className="w-3 h-3 text-emerald-200" />
+          <span>Presenting Screen</span>
+        </div>
+      )}
+
+      {!showVideo && (
+        <div className="flex flex-col items-center justify-center p-4 text-center">
+          <div className="w-14 h-14 rounded-full bg-emerald-700 text-white font-bold text-lg flex items-center justify-center border-2 border-emerald-400/50">
+            {peer.name
+              .split(' ')
+              .slice(0, 2)
+              .map((n) => n[0])
+              .join('')}
+          </div>
+          <p className="text-white font-bold text-xs mt-2 truncate max-w-full">{peer.name}</p>
+          <span className="text-[10px] text-emerald-300">
+            {isHost ? 'Meeting Host' : peer.role} •{' '}
+            {connState === 'connected' ? 'Audio Live' : connState || 'Connecting...'}
+          </span>
+        </div>
+      )}
+
+      <div className="absolute bottom-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-black/65 text-white text-[11px] font-semibold flex items-center gap-1.5">
+        {peer.micOn ? (
+          <Mic className="w-3 h-3 text-emerald-400" />
+        ) : (
+          <MicOff className="w-3 h-3 text-red-400" />
+        )}
+        <span className="truncate max-w-[140px]">{peer.name}</span>
+      </div>
+
+      {peer.handRaised && (
+        <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold flex items-center gap-1">
+          <Hand className="w-3 h-3" />
+          <span>Raised</span>
         </div>
       )}
     </div>

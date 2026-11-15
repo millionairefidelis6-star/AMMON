@@ -347,7 +347,7 @@ export default function App() {
 
   const handleRegisteredMember = (newMember: Member) => {
     setMembers((prev) => mergeRealMembers([[newMember], prev]));
-    addMemberToFirestore(newMember);
+    addMemberToFirestore(newMember).catch(() => {});
     // Require email OTP confirmation before granting access to member dashboard or ID card
     if (newMember.emailVerified !== true) {
       setPendingOtpMember(newMember);
@@ -365,7 +365,6 @@ export default function App() {
 
   const handleEmailOtpVerified = (verifiedMember: Member) => {
     setMembers((prev) => mergeRealMembers([[verifiedMember], prev]));
-    addMemberToFirestore(verifiedMember);
     setLoggedInMember(verifiedMember);
     setCurrentMember(verifiedMember);
     try {
@@ -379,38 +378,38 @@ export default function App() {
 
   const handleAddNews = (article: NewsArticle) => {
     setNews([article, ...news]);
-    addNewsToFirestore(article);
+    addNewsToFirestore(article).catch(() => {});
   };
 
   const handleResolveDispute = (id: string) => {
     setDisputes(
       disputes.map((d) => (d.id === id ? { ...d, status: 'Resolved' } : d))
     );
-    updateDisputeInFirestore(id, { status: 'Resolved' });
+    updateDisputeInFirestore(id, { status: 'Resolved' }).catch(() => {});
   };
 
   const handleSendSocialMessage = (msg: SocialMessage) => {
     setSocialMessages((prev) => [...prev, msg]);
-    addSocialMessageToFirestore(msg);
+    addSocialMessageToFirestore(msg).catch(() => {});
   };
 
   const handleUpdateSocialMessage = (id: string, updates: Partial<SocialMessage>) => {
     setSocialMessages((prev) =>
       prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
     );
-    updateSocialMessageInFirestore(id, updates);
+    updateSocialMessageInFirestore(id, updates).catch(() => {});
   };
 
   const handleCreateMeeting = (mtg: OnlineMeeting) => {
     setMeetings((prev) => [mtg, ...prev]);
-    addMeetingToFirestore(mtg);
+    addMeetingToFirestore(mtg).catch(() => {});
   };
 
   const handleUpdateMeeting = (id: string, updates: Partial<OnlineMeeting>) => {
     setMeetings((prev) =>
       prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
     );
-    updateMeetingInFirestore(id, updates);
+    updateMeetingInFirestore(id, updates).catch(() => {});
   };
 
   const handleOpenVerifyForId = (id: string) => {
@@ -742,7 +741,7 @@ export default function App() {
         onClose={() => setShowDisputeModal(false)}
         onSubmitDispute={(ticket) => {
           setDisputes([ticket, ...disputes]);
-          addDisputeToFirestore(ticket);
+          addDisputeToFirestore(ticket).catch(() => {});
         }}
       />
 

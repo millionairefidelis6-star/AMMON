@@ -329,6 +329,20 @@ export interface SocialMessage {
   createdAtMs: number;
 }
 
+export interface MeetingRecording {
+  id: string;
+  title: string;
+  url: string;
+  storagePath: string;
+  bucketName: string;
+  mimeType: string;
+  sizeLabel: string;
+  durationLabel: string;
+  recordedBy: string;
+  recordedAt: string;
+  createdAtMs: number;
+}
+
 export interface OnlineMeeting {
   id: string;
   title: string;
@@ -343,5 +357,8 @@ export interface OnlineMeeting {
   meetingCode: string;
   participants: string[];
   raisedHands: string[];
+  isRecording?: boolean;
+  recordingStartedBy?: string;
+  recordings?: MeetingRecording[];
   createdAtMs: number;
 }

@@ -1,6 +1,13 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // AMMON User Dashboard Profile & Chat Display Photos
+    match /profile-photos/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // AMMON Member Passports & KYC Verification Documents
     match /ammon-kyc/{folder}/{sessionId}/{fileName} {
       allow read: if true;
@@ -12,13 +19,14 @@ service firebase.storage {
     // AMMON Social Space Chat Media (Videos, Audio, Photos, Documents)
     match /ammon-chat-media/{channelId}/{fileName} {
       allow read: if true;
-      allow write: if request.resource.size < 25 * 1024 * 1024
+      allow create, update: if request.resource.size < 25 * 1024 * 1024
         && (
           request.resource.contentType.matches('video/.*') ||
           request.resource.contentType.matches('audio/.*') ||
           request.resource.contentType.matches('image/.*') ||
           request.resource.contentType == 'application/pdf'
         );
+      allow delete: if true;
     }
 
     // AMMON Online Meeting Session Recordings (Dedicated 'recordings/' folder in AMMON bucket)

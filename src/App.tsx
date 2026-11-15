@@ -35,7 +35,11 @@ import {
   getStoredExecutiveToken,
   loginExecutive,
   setStoredExecutiveToken,
+  updateMemberProfilePhotoApi,
+  updateExecutiveProfilePhotoApi,
+  permanentDeleteSocialMessageApi,
 } from './services/executiveApi';
+import { deleteChatMediaAsset } from './services/storageService';
 import {
   LEGACY_TEST_MEMBER_IDS,
   subscribeToMembers,
@@ -44,11 +48,13 @@ import {
   subscribeToSocialMessages,
   subscribeToMeetings,
   addMemberToFirestore,
+  updateMemberInFirestore,
   addNewsToFirestore,
   addDisputeToFirestore,
   updateDisputeInFirestore,
   addSocialMessageToFirestore,
   updateSocialMessageInFirestore,
+  deleteSocialMessagePermanentlyInFirestore,
   addMeetingToFirestore,
   updateMeetingInFirestore,
   seedInitialFirestoreData,
@@ -400,6 +406,26 @@ export default function App() {
     updateSocialMessageInFirestore(id, updates).catch(() => {});
   };
 
+  const handlePermanentDeleteSocialMessage = async (msg: SocialMessage) => {
+    const isSuper =
+      Boolean(adminUser) &&
+      (adminUser?.level === 'super_admin' || adminUser?.role === 'Super Admin');
+    if (!isSuper || !adminUser) return;
+
+    setSocialMessages((prev) => prev.filter((m) => m.id !== msg.id));
+
+    await Promise.allSettled([
+      deleteChatMediaAsset(msg.attachmentData, msg.attachmentStoragePath),
+      permanentDeleteSocialMessageApi(msg.id, {
+        attachmentData: msg.attachmentData,
+        attachmentStoragePath: msg.attachmentStoragePath,
+        channelId: msg.channelId,
+        senderName: msg.senderName,
+      }),
+      deleteSocialMessagePermanentlyInFirestore(msg.id, adminUser.fullName),
+    ]);
+  };
+
   const handleCreateMeeting = (mtg: OnlineMeeting) => {
     setMeetings((prev) => [mtg, ...prev]);
     addMeetingToFirestore(mtg).catch(() => {});
@@ -410,6 +436,57 @@ export default function App() {
       prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
     );
     updateMeetingInFirestore(id, updates).catch(() => {});
+  };
+
+  const handleUpdateMemberProfilePhoto = async (
+    memberId: string,
+    photoUrl: string,
+    passportStoragePath?: string
+  ) => {
+    setMembers((prev) =>
+      prev.map((m) =>
+        m.id === memberId
+          ? { ...m, photoUrl, ...(passportStoragePath ? { passportStoragePath } : {}) }
+          : m
+      )
+    );
+    setLoggedInMember((prev) => {
+      if (!prev || prev.id !== memberId) return prev;
+      const updated = {
+        ...prev,
+        photoUrl,
+        ...(passportStoragePath ? { passportStoragePath } : {}),
+      };
+      try {
+        localStorage.setItem('ammon_logged_in_member', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    setCurrentMember((prev) =>
+      prev && prev.id === memberId
+        ? { ...prev, photoUrl, ...(passportStoragePath ? { passportStoragePath } : {}) }
+        : prev
+    );
+
+    const firestoreUpdates: Partial<Member> = { photoUrl };
+    if (passportStoragePath) firestoreUpdates.passportStoragePath = passportStoragePath;
+
+    await Promise.allSettled([
+      updateMemberInFirestore(memberId, firestoreUpdates),
+      updateMemberProfilePhotoApi(memberId, photoUrl, passportStoragePath),
+    ]);
+  };
+
+  const handleUpdateAdminProfilePhoto = async (avatarUrl: string) => {
+    setAdminUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, avatarUrl };
+      try {
+        localStorage.setItem('ammon_logged_in_admin', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    await updateExecutiveProfilePhotoApi(avatarUrl).catch(() => {});
   };
 
   const handleOpenVerifyForId = (id: string) => {
@@ -674,6 +751,9 @@ export default function App() {
           onUpdateMessage={handleUpdateSocialMessage}
           onCreateMeeting={handleCreateMeeting}
           onUpdateMeeting={handleUpdateMeeting}
+          onUpdateProfilePhoto={(photoUrl, storagePath) =>
+            handleUpdateMemberProfilePhoto(currentMember.id, photoUrl, storagePath)
+          }
         />
       )}
 
@@ -699,8 +779,14 @@ export default function App() {
           meetings={meetings}
           onSendMessage={handleSendSocialMessage}
           onUpdateMessage={handleUpdateSocialMessage}
+          onPermanentDeleteMessage={
+            adminUser.level === 'super_admin' || adminUser.role === 'Super Admin'
+              ? handlePermanentDeleteSocialMessage
+              : undefined
+          }
           onCreateMeeting={handleCreateMeeting}
           onUpdateMeeting={handleUpdateMeeting}
+          onUpdateProfilePhoto={handleUpdateAdminProfilePhoto}
         />
       )}
 
@@ -716,6 +802,11 @@ export default function App() {
         meetings={meetings}
         onSendMessage={handleSendSocialMessage}
         onUpdateMessage={handleUpdateSocialMessage}
+        onPermanentDeleteMessage={
+          adminUser && (adminUser.level === 'super_admin' || adminUser.role === 'Super Admin')
+            ? handlePermanentDeleteSocialMessage
+            : undefined
+        }
         onCreateMeeting={handleCreateMeeting}
         onUpdateMeeting={handleUpdateMeeting}
       />

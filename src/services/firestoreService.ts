@@ -194,8 +194,9 @@ export function subscribeToSocialMessages(
       (snapshot: QuerySnapshot<DocumentData>) => {
         const list: SocialMessage[] = [];
         snapshot.forEach((docSnap: QueryDocumentSnapshot<DocumentData>) => {
-          if (!LEGACY_TEST_SOCIAL_IDS.has(docSnap.id)) {
-            list.push(docSnap.data() as SocialMessage);
+          const data = docSnap.data() as SocialMessage;
+          if (!LEGACY_TEST_SOCIAL_IDS.has(docSnap.id) && data?.permanentlyDeleted !== true) {
+            list.push(data);
           }
         });
         list.sort((a, b) => (a.createdAtMs || 0) - (b.createdAtMs || 0));
@@ -309,6 +310,47 @@ export async function updateSocialMessageInFirestore(id: string, updates: Partia
     );
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${SOCIAL_MESSAGES_PATH}/${id}`);
+  }
+}
+
+export async function deleteSocialMessagePermanentlyInFirestore(
+  id: string,
+  deletedByName: string
+) {
+  try {
+    await deleteDoc(doc(db, SOCIAL_MESSAGES_PATH, id));
+    return;
+  } catch (deleteError) {
+    // When Super Admin authenticates via AMMON's executive credential (without Firebase Google Auth),
+    // Firestore `allow delete: if isSuperAdmin()` rejects `request.auth == null`.
+    // Purge all text, media links, and metadata permanently via updateDoc so the post and media are gone for everyone.
+    const code = (deleteError as { code?: string })?.code;
+    if (code === 'permission-denied' || code === 'unauthenticated') {
+      try {
+        await updateDoc(doc(db, SOCIAL_MESSAGES_PATH, id), {
+          text: '',
+          mentions: [],
+          attachmentName: '',
+          attachmentType: '',
+          attachmentSize: '',
+          attachmentData: '',
+          attachmentStoragePath: '',
+          replyToId: '',
+          replyToSender: '',
+          replyToText: '',
+          likes: [],
+          reactions: {},
+          deletedByAuthor: true,
+          removedByAdmin: true,
+          removedByAdminName: deletedByName,
+          permanentlyDeleted: true,
+        });
+        return;
+      } catch (updateErr) {
+        handleFirestoreError(updateErr, OperationType.DELETE, `${SOCIAL_MESSAGES_PATH}/${id}`);
+      }
+    }
+    handleFirestoreError(deleteError, OperationType.DELETE, `${SOCIAL_MESSAGES_PATH}/${id}`);
   }
 }
 

@@ -231,3 +231,36 @@ export async function processKycDocumentImage(
     sizeKb: Math.max(1, Math.round(blob.size / 1024)),
   };
 }
+
+/**
+ * Resize and cover-crop any uploaded photo into a crisp 384x384 square avatar
+ * suitable for member/executive dashboard profiles and chat room display pictures.
+ */
+export async function processProfileAvatar(
+  source: File | Blob
+): Promise<{ blob: Blob; dataUrl: string; sizeKb: number }> {
+  const AVATAR_SIZE = 384;
+  const canvas = document.createElement('canvas');
+  canvas.width = AVATAR_SIZE;
+  canvas.height = AVATAR_SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Unable to initialize profile avatar processor.');
+
+  ctx.fillStyle = '#F8FAFC';
+  ctx.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
+
+  const img = await loadImageElementFromSource(source);
+  const srcW = img.naturalWidth || img.width;
+  const srcH = img.naturalHeight || img.height;
+
+  drawImageCoverToCanvas(ctx, img, srcW, srcH, 0, 0, AVATAR_SIZE, AVATAR_SIZE, 0.5, 0.25);
+
+  const blob = await canvasToJpegBlob(canvas, 0.88);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+
+  return {
+    blob,
+    dataUrl,
+    sizeKb: Math.max(1, Math.round(blob.size / 1024)),
+  };
+}

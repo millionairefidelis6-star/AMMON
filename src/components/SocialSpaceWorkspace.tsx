@@ -41,7 +41,12 @@ import {
   Power,
   Disc,
   Square,
-  Play
+  Play,
+  Pencil,
+  Trash2,
+  EyeOff,
+  ShieldAlert,
+  AlertTriangle
 } from 'lucide-react';
 import { Member, AdminUser, SocialMessage, OnlineMeeting, MeetingRecording } from '../types';
 import { SOCIAL_CHANNELS, ADMIN_USERS } from '../data/mockData';
@@ -65,6 +70,8 @@ interface CurrentParticipant {
   role: string;
   badge: string;
   avatar?: string;
+  isAdmin?: boolean;
+  isSuperAdmin?: boolean;
 }
 
 interface SocialSpaceWorkspaceProps {
@@ -74,6 +81,7 @@ interface SocialSpaceWorkspaceProps {
   meetings: OnlineMeeting[];
   onSendMessage: (msg: SocialMessage) => void;
   onUpdateMessage: (id: string, updates: Partial<SocialMessage>) => void;
+  onPermanentDeleteMessage?: (msg: SocialMessage) => Promise<void> | void;
   onCreateMeeting: (meeting: OnlineMeeting) => void;
   onUpdateMeeting: (id: string, updates: Partial<OnlineMeeting>) => void;
   initialTab?: SocialSpaceTab;
@@ -133,6 +141,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
   meetings,
   onSendMessage,
   onUpdateMessage,
+  onPermanentDeleteMessage,
   onCreateMeeting,
   onUpdateMeeting,
   initialTab = 'chat',
@@ -151,6 +160,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     type: string;
     size: string;
     data: string;
+    storagePath?: string;
   } | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
@@ -161,6 +171,52 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     name: string;
     kind: 'image' | 'video';
   } | null>(null);
+  const [previewAvatar, setPreviewAvatar] = useState<{
+    src?: string;
+    name: string;
+    role?: string;
+    badge?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!previewAvatar && !previewMedia) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewAvatar(null);
+        setPreviewMedia(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewAvatar, previewMedia]);
+
+  // Chat Edit & Role-Based Delete State
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [deleteMenuMsgId, setDeleteMenuMsgId] = useState<string | null>(null);
+  const [permanentConfirmMsg, setPermanentConfirmMsg] = useState<SocialMessage | null>(null);
+  const [isDeletingPermanent, setIsDeletingPermanent] = useState(false);
+
+  const hiddenStorageKey = `ammon_hidden_chat_${currentUser.id}`;
+  const [localHiddenMsgIds, setLocalHiddenMsgIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(`ammon_hidden_chat_${currentUser.id}`);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(hiddenStorageKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setLocalHiddenMsgIds(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setLocalHiddenMsgIds([]);
+    }
+  }, [hiddenStorageKey]);
 
   // @ Mention state
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -277,8 +333,22 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
       .slice(0, 6);
   }, [mentionQuery, taggablePeople]);
 
+  const canModerateAll = Boolean(currentUser.isAdmin || currentUser.isSuperAdmin);
+  const canPermanentDelete = Boolean(currentUser.isSuperAdmin && onPermanentDeleteMessage);
+
+  const isMessageHiddenForMe = (msg: SocialMessage): boolean => {
+    if (msg.permanentlyDeleted === true) return true;
+    if (localHiddenMsgIds.includes(msg.id)) return true;
+    if (Array.isArray(msg.deletedForUserIds) && msg.deletedForUserIds.includes(currentUser.id)) {
+      return true;
+    }
+    return false;
+  };
+
   const activeChannel = SOCIAL_CHANNELS.find((c) => c.id === activeChannelId) || SOCIAL_CHANNELS[0];
-  const channelMessages = messages.filter((m) => m.channelId === activeChannelId);
+  const channelMessages = messages.filter(
+    (m) => m.channelId === activeChannelId && !isMessageHiddenForMe(m)
+  );
 
   const activeMeeting = meetings.find((m) => m.id === activeMeetingId) || null;
   const liveMeetingsCount = meetings.filter((m) => m.status === 'Live').length;
@@ -1131,6 +1201,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
           type: uploaded.contentType,
           size: uploaded.sizeLabel,
           data: uploaded.url,
+          storagePath: uploaded.storagePath,
         });
         return;
       }
@@ -1188,6 +1259,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
       attachmentType: pendingAttachment?.type,
       attachmentSize: pendingAttachment?.size,
       attachmentData: pendingAttachment?.data,
+      attachmentStoragePath: pendingAttachment?.storagePath,
       replyToId: replyingTo?.id,
       replyToSender: replyingTo?.senderName,
       replyToText: replyingTo?.text?.slice(0, 90),
@@ -1234,6 +1306,90 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
     }
     onUpdateMessage(msg.id, { reactions: currentReactions });
     setOpenPickerMsgId(null);
+  };
+
+  const handleStartEdit = (msg: SocialMessage) => {
+    setDeleteMenuMsgId(null);
+    setOpenPickerMsgId(null);
+    setEditingMessageId(msg.id);
+    setEditingText(msg.text || '');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingText('');
+  };
+
+  const handleSaveEdit = (msg: SocialMessage) => {
+    const trimmed = editingText.trim();
+    if (!trimmed) return;
+    onUpdateMessage(msg.id, {
+      text: trimmed,
+      mentions: extractMentions(trimmed),
+      edited: true,
+      editedAtMs: Date.now(),
+    });
+    setEditingMessageId(null);
+    setEditingText('');
+  };
+
+  const handleDeleteForMe = (msg: SocialMessage) => {
+    const nextLocal = Array.from(new Set([...localHiddenMsgIds, msg.id]));
+    setLocalHiddenMsgIds(nextLocal);
+    try {
+      localStorage.setItem(hiddenStorageKey, JSON.stringify(nextLocal));
+    } catch {
+      // Ignore localStorage quota restrictions
+    }
+    const existingHidden = Array.isArray(msg.deletedForUserIds) ? msg.deletedForUserIds : [];
+    if (!existingHidden.includes(currentUser.id)) {
+      onUpdateMessage(msg.id, {
+        deletedForUserIds: [...existingHidden, currentUser.id],
+      });
+    }
+    if (editingMessageId === msg.id) {
+      handleCancelEdit();
+    }
+    setDeleteMenuMsgId(null);
+  };
+
+  const handleWithdrawOwnPost = (msg: SocialMessage) => {
+    const isOwnMsg = msg.senderId === currentUser.id || msg.senderName === currentUser.name;
+    if (!isOwnMsg && !canModerateAll) return;
+    onUpdateMessage(msg.id, {
+      deletedByAuthor: true,
+      deletedByAuthorAtMs: Date.now(),
+    });
+    if (editingMessageId === msg.id) {
+      handleCancelEdit();
+    }
+    setDeleteMenuMsgId(null);
+  };
+
+  const handleAdminRemoveUnwantedPost = (msg: SocialMessage) => {
+    if (!canModerateAll) return;
+    onUpdateMessage(msg.id, {
+      removedByAdmin: true,
+      removedByAdminName: currentUser.name,
+      removedByAdminId: currentUser.id,
+      removedAtMs: Date.now(),
+    });
+    if (editingMessageId === msg.id) {
+      handleCancelEdit();
+    }
+    setDeleteMenuMsgId(null);
+  };
+
+  const handleConfirmPermanentDelete = async () => {
+    if (!canPermanentDelete || !permanentConfirmMsg || !onPermanentDeleteMessage) return;
+    setIsDeletingPermanent(true);
+    try {
+      await onPermanentDeleteMessage(permanentConfirmMsg);
+      setPermanentConfirmMsg(null);
+      setDeleteMenuMsgId(null);
+    } finally {
+      setIsDeletingPermanent(false);
+    }
   };
 
   // Render text with clickable/highlighted @Member mentions
@@ -1728,56 +1884,118 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
       c.description.toLowerCase().includes(channelSearch.toLowerCase())
   );
 
+  const resolveMessageAvatar = (msg: SocialMessage): string | undefined => {
+    const isSelf = msg.senderId === currentUser.id || msg.senderName === currentUser.name;
+    if (isSelf && currentUser.avatar) return currentUser.avatar;
+    const matchedMember = members.find(
+      (m) => m.id === msg.senderId || m.fullName === msg.senderName
+    );
+    if (matchedMember?.photoUrl) return matchedMember.photoUrl;
+    return msg.senderAvatar;
+  };
+
+  const getInitials = (fullName: string) =>
+    fullName
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('') || 'AM';
+
   return (
-    <div className="w-full h-full flex flex-col bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden shadow-xs text-left">
+    <div className="w-full h-full flex-1 min-h-0 flex flex-col bg-white rounded-none sm:rounded-2xl border-0 sm:border sm:border-[#E5E7EB] overflow-hidden shadow-xs text-left">
       {/* Top Workspace Header Strip */}
-      <div className="bg-[#14532D] text-white px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
-            {activeTab === 'chat' ? (
-              <MessageSquare className="w-5 h-5 text-emerald-200" />
-            ) : (
-              <Video className="w-5 h-5 text-emerald-200" />
-            )}
+      <div className="bg-[#14532D] text-white px-3 sm:px-5 py-2 sm:py-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0">
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() =>
+                setPreviewAvatar({
+                  src: currentUser.avatar,
+                  name: currentUser.name,
+                  role: currentUser.role,
+                  badge: currentUser.badge,
+                })
+              }
+              title={`View ${currentUser.name}'s profile picture`}
+              aria-label={`View ${currentUser.name}'s profile picture`}
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border-2 border-emerald-300/70 shrink-0 bg-emerald-950 flex items-center justify-center font-bold text-xs text-emerald-100 cursor-pointer hover:ring-2 hover:ring-white/80 transition-all"
+            >
+              {currentUser.avatar ? (
+                <>
+                  <img
+                    src={currentUser.avatar}
+                    alt={currentUser.name}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                      if (fallback) {
+                        fallback.classList.remove('hidden');
+                        fallback.classList.add('flex');
+                      }
+                    }}
+                    className="w-full h-full object-cover object-top"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className="hidden w-full h-full items-center justify-center">
+                    {getInitials(currentUser.name)}
+                  </span>
+                </>
+              ) : (
+                <span>{getInitials(currentUser.name)}</span>
+              )}
+            </button>
+            <div className="min-w-0">
+              <h3 className="font-bold text-xs sm:text-base leading-tight truncate">
+                AMMON Community &amp; Meetings
+              </h3>
+              <p className="text-[10px] sm:text-[11px] text-emerald-200 truncate">
+                Signed in as <strong>{currentUser.name}</strong> ({currentUser.role})
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h3 className="font-bold text-sm sm:text-base leading-tight truncate">
-              AMMON Community Space &amp; Online Meetings
-            </h3>
-            <p className="text-[11px] text-emerald-200 truncate">
-              Signed in as <strong>{currentUser.name}</strong> ({currentUser.role}) • End-to-end Firestore Sync
-            </p>
-          </div>
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="sm:hidden p-1.5 rounded-lg text-white/85 hover:text-white hover:bg-white/10 cursor-pointer shrink-0"
+              aria-label="Close Social Space"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Mode Switcher: WhatsApp Chat vs Online Meetings */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="bg-black/25 p-1 rounded-xl flex items-center gap-1">
+        <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+          <div className="bg-black/25 p-1 rounded-xl flex items-center gap-1 w-full sm:w-auto">
             <button
               type="button"
               onClick={() => setActiveTab('chat')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'chat'
                   ? 'bg-white text-[#14532D] shadow-xs'
                   : 'text-emerald-100 hover:text-white'
               }`}
             >
-              <MessageSquare className="w-3.5 h-3.5" />
+              <MessageSquare className="w-3.5 h-3.5 shrink-0" />
               <span>Social Chats</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('meetings')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'meetings'
                   ? 'bg-white text-[#14532D] shadow-xs'
                   : 'text-emerald-100 hover:text-white'
               }`}
             >
-              <Video className="w-3.5 h-3.5" />
+              <Video className="w-3.5 h-3.5 shrink-0" />
               <span>Online Meetings</span>
               {liveMeetingsCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 text-[9px] rounded-full bg-red-500 text-white font-extrabold animate-pulse">
+                <span className="ml-0.5 px-1.5 py-0.2 text-[9px] rounded-full bg-red-500 text-white font-extrabold animate-pulse shrink-0">
                   {liveMeetingsCount} LIVE
                 </span>
               )}
@@ -1788,7 +2006,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 cursor-pointer"
+              className="hidden sm:inline-flex p-1.5 rounded-lg text-white/85 hover:text-white hover:bg-white/10 cursor-pointer shrink-0"
               aria-label="Close Social Space"
             >
               <X className="w-5 h-5" />
@@ -1801,12 +2019,12 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
       {/* TAB 1: WHATSAPP-STYLE SOCIAL CHAT SPACE                           */}
       {/* ================================================================= */}
       {activeTab === 'chat' && (
-        <div className="flex-1 flex min-h-[540px] max-h-[75vh] overflow-hidden relative">
+        <div className="flex-1 min-h-0 flex overflow-hidden relative">
           {/* LEFT PANE: Channels & Contacts (WhatsApp Chats List) */}
           <div
             className={`${
               mobileShowThread ? 'hidden md:flex' : 'flex'
-            } w-full md:w-76 lg:w-80 border-r border-[#E5E7EB] flex-col bg-white shrink-0`}
+            } w-full md:w-76 lg:w-80 h-full min-h-0 border-r border-[#E5E7EB] flex-col bg-white shrink-0`}
           >
             {/* Search Box */}
             <div className="p-3 border-b border-gray-100 bg-[#F9FBFA]">
@@ -1825,7 +2043,9 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
             {/* Channel Items */}
             <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
               {filteredChannels.map((ch) => {
-                const chMsgs = messages.filter((m) => m.channelId === ch.id);
+                const chMsgs = messages.filter(
+                  (m) => m.channelId === ch.id && !isMessageHiddenForMe(m)
+                );
                 const lastMsg = chMsgs[chMsgs.length - 1];
                 const isSelected = activeChannelId === ch.id;
                 return (
@@ -1862,7 +2082,13 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-gray-500 truncate mt-0.5">
-                        {lastMsg ? `${lastMsg.senderName.split(' ')[0]}: ${lastMsg.text}` : ch.description}
+                        {lastMsg
+                          ? lastMsg.removedByAdmin
+                            ? 'Post removed by Moderator'
+                            : lastMsg.deletedByAuthor
+                            ? 'Message withdrawn by sender'
+                            : `${lastMsg.senderName.split(' ')[0]}: ${lastMsg.text}`
+                          : ch.description}
                       </p>
                       <div className="flex items-center justify-between mt-1">
                         <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 rounded bg-white border border-[#E5E7EB] text-[#176B37]">
@@ -1900,10 +2126,10 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
           <div
             className={`${
               mobileShowThread ? 'flex' : 'hidden md:flex'
-            } flex-1 flex-col bg-[#EFEAE2]/65 min-w-0 relative`}
+            } flex-1 h-full min-h-0 flex-col bg-[#EFEAE2]/65 min-w-0 relative`}
           >
             {/* Active Channel Header */}
-            <div className="bg-white px-4 py-3 border-b border-[#E5E7EB] flex items-center justify-between gap-3 shrink-0">
+            <div className="bg-white px-3 sm:px-4 py-2 sm:py-3 border-b border-[#E5E7EB] flex items-center justify-between gap-2 shrink-0">
               <div className="flex items-center gap-2.5 min-w-0">
                 <button
                   type="button"
@@ -1955,23 +2181,64 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                 const likes = Array.isArray(msg.likes) ? msg.likes : [];
                 const isLikedByMe = likes.includes(currentUser.id);
                 const reactions = msg.reactions || {};
+                const avatarSrc = resolveMessageAvatar(msg);
 
                 return (
                   <div
                     key={msg.id}
-                    className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} group`}
+                    className={`flex items-end gap-2 ${isOwn ? 'justify-end' : 'justify-start'} group`}
                   >
+                    {!isOwn && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPreviewAvatar({
+                            src: avatarSrc,
+                            name: msg.senderName,
+                            role: msg.senderRole,
+                          })
+                        }
+                        title={`View ${msg.senderName}'s profile picture`}
+                        aria-label={`View ${msg.senderName}'s profile picture`}
+                        className="w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border border-[#E5E7EB] bg-[#EAF3ED] text-[#176B37] flex items-center justify-center font-bold text-[11px] shrink-0 shadow-2xs cursor-pointer hover:ring-2 hover:ring-[#176B37]/60 transition-all"
+                      >
+                        {avatarSrc ? (
+                          <>
+                            <img
+                              src={avatarSrc}
+                              alt={msg.senderName}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                                if (fallback) {
+                                  fallback.classList.remove('hidden');
+                                  fallback.classList.add('flex');
+                                }
+                              }}
+                              className="w-full h-full object-cover object-top"
+                              referrerPolicy="no-referrer"
+                            />
+                            <span className="hidden w-full h-full items-center justify-center">
+                              {getInitials(msg.senderName)}
+                            </span>
+                          </>
+                        ) : (
+                          <span>{getInitials(msg.senderName)}</span>
+                        )}
+                      </button>
+                    )}
+
                     <div
-                      className={`max-w-[88%] sm:max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative ${
+                      className={`max-w-[82%] sm:max-w-[72%] rounded-2xl px-3.5 py-2.5 shadow-xs border relative ${
                         isOwn
-                          ? 'bg-[#DCF8C6] border-emerald-300/70 rounded-tr-xs'
-                          : 'bg-white border-[#E5E7EB] rounded-tl-xs'
+                          ? 'bg-[#DCF8C6] border-emerald-300/70 rounded-br-xs'
+                          : 'bg-white border-[#E5E7EB] rounded-bl-xs'
                       }`}
                     >
                       {/* Sender Header */}
                       <div className="flex items-center justify-between gap-3 mb-1">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="font-bold text-[11px] text-[#14532D] truncate">
+                          <span className="font-extrabold text-xs text-[#14532D] truncate">
                             {msg.senderName}
                           </span>
                           <span
@@ -1988,219 +2255,461 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                         </div>
                       </div>
 
-                      {/* Reply Quote Strip if replying to a comment */}
-                      {msg.replyToSender && (
-                        <div className="mb-2 p-2 rounded-lg bg-black/5 border-l-4 border-[#176B37] text-[11px]">
-                          <p className="font-bold text-[#176B37]">{msg.replyToSender}</p>
-                          <p className="text-gray-600 truncate">{msg.replyToText}</p>
+                      {msg.removedByAdmin || msg.deletedByAuthor ? (
+                        <div className="py-1 space-y-2">
+                          <div className="flex items-center gap-2 text-xs italic text-gray-500">
+                            {msg.removedByAdmin ? (
+                              <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+                            ) : (
+                              <EyeOff className="w-4 h-4 text-gray-400 shrink-0" />
+                            )}
+                            <span>
+                              {msg.removedByAdmin
+                                ? `Post removed by AMMON Moderator (${msg.removedByAdminName || 'Admin'}).`
+                                : `This message was withdrawn by ${isOwn ? 'you' : msg.senderName}.`}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-black/5">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteForMe(msg)}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/5 text-gray-600 hover:bg-black/10 cursor-pointer"
+                                title="Remove from my view only"
+                              >
+                                <EyeOff className="w-3 h-3" />
+                                <span>Delete for Me</span>
+                              </button>
+                              {canPermanentDelete && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPermanentConfirmMsg(msg)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 cursor-pointer"
+                                  title="Super Admin: permanently erase post and media for everyone"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Delete for All (Permanent)</span>
+                                </button>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-gray-400 ml-auto">{msg.timestampLabel}</span>
+                          </div>
                         </div>
-                      )}
+                      ) : (
+                        <>
+                          {/* Reply Quote Strip if replying to a comment */}
+                          {msg.replyToSender && (
+                            <div className="mb-2 p-2 rounded-lg bg-black/5 border-l-4 border-[#176B37] text-[11px]">
+                              <p className="font-bold text-[#176B37]">{msg.replyToSender}</p>
+                              <p className="text-gray-600 truncate">{msg.replyToText}</p>
+                            </div>
+                          )}
 
-                      {/* Device Attachment Preview: Images, Videos, Audio & Documents */}
-                      {msg.attachmentData && msg.attachmentType?.startsWith('image/') && (
-                        <div className="mb-2 rounded-xl overflow-hidden border border-black/10 bg-white">
-                          <img
-                            src={msg.attachmentData}
-                            alt={msg.attachmentName || 'Uploaded image'}
-                            onClick={() =>
-                              setPreviewMedia({
-                                src: msg.attachmentData!,
-                                name: msg.attachmentName || 'image.jpg',
-                                kind: 'image',
-                              })
-                            }
-                            className="max-h-60 w-full object-cover cursor-pointer hover:opacity-95 transition-opacity"
-                          />
-                        </div>
-                      )}
+                          {/* Device Attachment Preview: Images, Videos, Audio & Documents */}
+                          {msg.attachmentData && msg.attachmentType?.startsWith('image/') && (
+                            <div className="mb-2 rounded-xl overflow-hidden border border-black/10 bg-white">
+                              <img
+                                src={msg.attachmentData}
+                                alt={msg.attachmentName || 'Uploaded image'}
+                                onClick={() =>
+                                  setPreviewMedia({
+                                    src: msg.attachmentData!,
+                                    name: msg.attachmentName || 'image.jpg',
+                                    kind: 'image',
+                                  })
+                                }
+                                className="max-h-60 w-full object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                              />
+                            </div>
+                          )}
 
-                      {msg.attachmentData &&
-                        isVideoFile(msg.attachmentName, msg.attachmentType) && (
-                          <div className="mb-2 rounded-xl overflow-hidden border border-black/15 bg-black shadow-xs">
-                            <video
-                              src={msg.attachmentData}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              className="w-full max-h-72 bg-black object-contain"
-                            />
-                            <div className="px-2.5 py-1.5 bg-slate-900/95 text-white flex items-center justify-between gap-2 text-[11px]">
-                              <span className="truncate font-semibold flex items-center gap-1.5 min-w-0">
-                                <Film className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                <span className="truncate">{msg.attachmentName || 'Video clip'}</span>
-                                {msg.attachmentSize && (
-                                  <span className="text-slate-400 shrink-0">({msg.attachmentSize})</span>
+                          {msg.attachmentData &&
+                            isVideoFile(msg.attachmentName, msg.attachmentType) && (
+                              <div className="mb-2 rounded-xl overflow-hidden border border-black/15 bg-black shadow-xs">
+                                <video
+                                  src={msg.attachmentData}
+                                  controls
+                                  playsInline
+                                  preload="metadata"
+                                  className="w-full max-h-72 bg-black object-contain"
+                                />
+                                <div className="px-2.5 py-1.5 bg-slate-900/95 text-white flex items-center justify-between gap-2 text-[11px]">
+                                  <span className="truncate font-semibold flex items-center gap-1.5 min-w-0">
+                                    <Film className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                    <span className="truncate">{msg.attachmentName || 'Video clip'}</span>
+                                    {msg.attachmentSize && (
+                                      <span className="text-slate-400 shrink-0">({msg.attachmentSize})</span>
+                                    )}
+                                  </span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setPreviewMedia({
+                                          src: msg.attachmentData!,
+                                          name: msg.attachmentName || 'video.mp4',
+                                          kind: 'video',
+                                        })
+                                      }
+                                      className="text-emerald-300 hover:text-white font-bold flex items-center gap-1 cursor-pointer"
+                                      title="Expand video player"
+                                    >
+                                      <Maximize2 className="w-3.5 h-3.5" />
+                                      <span>Expand</span>
+                                    </button>
+                                    <a
+                                      href={msg.attachmentData}
+                                      download={msg.attachmentName || 'video.mp4'}
+                                      className="text-slate-300 hover:text-white"
+                                      title="Download video"
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                    </a>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                          {msg.attachmentData &&
+                            isAudioFile(msg.attachmentName, msg.attachmentType) && (
+                              <div className="mb-2 p-2.5 rounded-xl bg-white/95 border border-[#E5E7EB] space-y-1.5">
+                                <div className="flex items-center justify-between gap-2 text-[11px]">
+                                  <span className="font-bold text-[#14532D] truncate flex items-center gap-1.5">
+                                    <Volume2 className="w-3.5 h-3.5 text-[#176B37] shrink-0" />
+                                    <span className="truncate">{msg.attachmentName || 'Audio clip'}</span>
+                                  </span>
+                                  {msg.attachmentSize && (
+                                    <span className="text-gray-400 shrink-0">{msg.attachmentSize}</span>
+                                  )}
+                                </div>
+                                <audio
+                                  src={msg.attachmentData}
+                                  controls
+                                  preload="metadata"
+                                  className="w-full h-9"
+                                />
+                              </div>
+                            )}
+
+                          {msg.attachmentData &&
+                            !msg.attachmentType?.startsWith('image/') &&
+                            !isVideoFile(msg.attachmentName, msg.attachmentType) &&
+                            !isAudioFile(msg.attachmentName, msg.attachmentType) && (
+                              <a
+                                href={msg.attachmentData}
+                                download={msg.attachmentName || 'attachment'}
+                                className="mb-2 p-2.5 rounded-xl bg-white/90 border border-[#E5E7EB] flex items-center justify-between gap-3 hover:bg-white transition-colors"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <div className="w-8 h-8 rounded-lg bg-[#EAF3ED] text-[#176B37] flex items-center justify-center shrink-0">
+                                    <FileText className="w-4 h-4" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-xs text-[#252525] truncate">{msg.attachmentName}</p>
+                                    <p className="text-[10px] text-gray-400">{msg.attachmentSize || 'Document'}</p>
+                                  </div>
+                                </div>
+                                <Download className="w-4 h-4 text-[#176B37] shrink-0" />
+                              </a>
+                            )}
+
+                          {/* Inline Edit Form or Formatted Message Text */}
+                          {editingMessageId === msg.id ? (
+                            <div className="space-y-2 my-1">
+                              <textarea
+                                value={editingText}
+                                onChange={(e) => setEditingText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSaveEdit(msg);
+                                  } else if (e.key === 'Escape') {
+                                    handleCancelEdit();
+                                  }
+                                }}
+                                rows={2}
+                                autoFocus
+                                className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-[#176B37] text-sm sm:text-[15px] font-bold text-[#111827] focus:outline-hidden resize-none"
+                              />
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={handleCancelEdit}
+                                  className="px-2.5 py-1 rounded-lg bg-black/5 hover:bg-black/10 text-gray-700 text-[11px] font-bold cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveEdit(msg)}
+                                  disabled={!editingText.trim()}
+                                  className="px-2.5 py-1 rounded-lg bg-[#176B37] hover:bg-[#14532D] text-white text-[11px] font-bold flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>Save</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm sm:text-[15px] font-bold text-[#111827] leading-relaxed whitespace-pre-wrap break-words">
+                              {renderFormattedMessageText(msg.text, isOwn)}
+                            </p>
+                          )}
+
+                          {/* Timestamp + Read Ticks + Quick Actions Row */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 mt-1.5 pt-1 border-t border-black/5">
+                            {/* Like, React, Reply, Edit & Delete Buttons */}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleLike(msg)}
+                                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors cursor-pointer ${
+                                  isLikedByMe
+                                    ? 'bg-red-50 text-red-600 border border-red-200'
+                                    : 'bg-black/5 text-gray-600 hover:bg-black/10'
+                                }`}
+                                title="Like comment"
+                              >
+                                <Heart className={`w-3 h-3 ${isLikedByMe ? 'fill-red-500 text-red-500' : ''}`} />
+                                <span>{likes.length > 0 ? likes.length : 'Like'}</span>
+                              </button>
+
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenPickerMsgId(openPickerMsgId === msg.id ? null : msg.id)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/5 text-gray-600 hover:bg-black/10 cursor-pointer"
+                                  title="React with emoji"
+                                >
+                                  <Smile className="w-3 h-3" />
+                                  <span>React</span>
+                                </button>
+
+                                {openPickerMsgId === msg.id && (
+                                  <div className="absolute bottom-full left-0 mb-1.5 bg-white border border-[#E5E7EB] rounded-full shadow-lg px-2 py-1 flex items-center gap-1 z-30">
+                                    {REACTION_EMOJIS.map((emoji) => (
+                                      <button
+                                        key={emoji}
+                                        type="button"
+                                        onClick={() => handleToggleReaction(msg, emoji)}
+                                        className="w-7 h-7 rounded-full hover:bg-[#EAF3ED] flex items-center justify-center text-sm cursor-pointer transition-transform hover:scale-110"
+                                      >
+                                        {emoji}
+                                      </button>
+                                    ))}
+                                  </div>
                                 )}
-                              </span>
-                              <div className="flex items-center gap-2 shrink-0">
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingTo(msg);
+                                  inputRef.current?.focus();
+                                }}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/5 text-gray-600 hover:bg-black/10 cursor-pointer"
+                                title="Reply to comment"
+                              >
+                                <Reply className="w-3 h-3" />
+                                <span>Reply</span>
+                              </button>
+
+                              {isOwn && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEdit(msg)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/5 text-gray-700 hover:bg-black/10 cursor-pointer"
+                                  title="Edit your message"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  <span>Edit</span>
+                                </button>
+                              )}
+
+                              <div className="relative">
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    setPreviewMedia({
-                                      src: msg.attachmentData!,
-                                      name: msg.attachmentName || 'video.mp4',
-                                      kind: 'video',
-                                    })
+                                    setDeleteMenuMsgId(deleteMenuMsgId === msg.id ? null : msg.id)
                                   }
-                                  className="text-emerald-300 hover:text-white font-bold flex items-center gap-1 cursor-pointer"
-                                  title="Expand video player"
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/5 text-gray-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                                  title="Delete post options"
                                 >
-                                  <Maximize2 className="w-3.5 h-3.5" />
-                                  <span>Expand</span>
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Delete</span>
                                 </button>
-                                <a
-                                  href={msg.attachmentData}
-                                  download={msg.attachmentName || 'video.mp4'}
-                                  className="text-slate-300 hover:text-white"
-                                  title="Download video"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                </a>
+
+                                {deleteMenuMsgId === msg.id && (
+                                  <div
+                                    className={`absolute bottom-full ${
+                                      isOwn ? 'right-0' : 'left-0'
+                                    } mb-1.5 w-64 bg-white border border-[#E5E7EB] rounded-2xl shadow-xl p-1.5 z-40 space-y-1 text-left`}
+                                  >
+                                    <div className="px-2.5 py-1 border-b border-gray-100 flex items-center justify-between">
+                                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">
+                                        Delete Options
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setDeleteMenuMsgId(null)}
+                                        className="text-gray-400 hover:text-gray-700 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteForMe(msg)}
+                                      className="w-full px-2.5 py-2 rounded-xl hover:bg-gray-50 flex items-start gap-2 text-left cursor-pointer"
+                                    >
+                                      <EyeOff className="w-3.5 h-3.5 text-gray-600 shrink-0 mt-0.5" />
+                                      <div>
+                                        <p className="text-[11px] font-bold text-[#252525]">Delete for Me</p>
+                                        <p className="text-[10px] text-gray-500 leading-tight">
+                                          Hides this post for you only; others still see it.
+                                        </p>
+                                      </div>
+                                    </button>
+
+                                    {isOwn && !canModerateAll && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleWithdrawOwnPost(msg)}
+                                        className="w-full px-2.5 py-2 rounded-xl hover:bg-amber-50 flex items-start gap-2 text-left cursor-pointer"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                                        <div>
+                                          <p className="text-[11px] font-bold text-amber-900">Withdraw My Post</p>
+                                          <p className="text-[10px] text-amber-700 leading-tight">
+                                            Clears your message content from channel view.
+                                          </p>
+                                        </div>
+                                      </button>
+                                    )}
+
+                                    {canModerateAll && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAdminRemoveUnwantedPost(msg)}
+                                        className="w-full px-2.5 py-2 rounded-xl hover:bg-amber-50 flex items-start gap-2 text-left cursor-pointer"
+                                      >
+                                        <ShieldAlert className="w-3.5 h-3.5 text-amber-700 shrink-0 mt-0.5" />
+                                        <div>
+                                          <p className="text-[11px] font-bold text-amber-900">
+                                            Delete Unwanted Post (Admin)
+                                          </p>
+                                          <p className="text-[10px] text-amber-700 leading-tight">
+                                            Removes unwanted content from community feed.
+                                          </p>
+                                        </div>
+                                      </button>
+                                    )}
+
+                                    {canPermanentDelete && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDeleteMenuMsgId(null);
+                                          setPermanentConfirmMsg(msg);
+                                        }}
+                                        className="w-full px-2.5 py-2 rounded-xl bg-red-50/70 hover:bg-red-100 flex items-start gap-2 text-left cursor-pointer border border-red-200"
+                                      >
+                                        <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                                        <div>
+                                          <p className="text-[11px] font-extrabold text-red-700">
+                                            Delete for All (Permanent)
+                                          </p>
+                                          <p className="text-[10px] text-red-600 leading-tight">
+                                            Super Admin: permanently erases chat, photos &amp; videos.
+                                          </p>
+                                        </div>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
-                          </div>
-                        )}
 
-                      {msg.attachmentData &&
-                        isAudioFile(msg.attachmentName, msg.attachmentType) && (
-                          <div className="mb-2 p-2.5 rounded-xl bg-white/95 border border-[#E5E7EB] space-y-1.5">
-                            <div className="flex items-center justify-between gap-2 text-[11px]">
-                              <span className="font-bold text-[#14532D] truncate flex items-center gap-1.5">
-                                <Volume2 className="w-3.5 h-3.5 text-[#176B37] shrink-0" />
-                                <span className="truncate">{msg.attachmentName || 'Audio clip'}</span>
-                              </span>
-                              {msg.attachmentSize && (
-                                <span className="text-gray-400 shrink-0">{msg.attachmentSize}</span>
+                            {/* Time, Edited Label & Checkmarks */}
+                            <div className="flex items-center gap-1 text-[10px] text-gray-500 ml-auto">
+                              {msg.edited && (
+                                <span className="text-[9px] italic text-gray-400 mr-0.5">edited</span>
                               )}
+                              <span>{msg.timestampLabel}</span>
+                              {isOwn && <CheckCheck className="w-3.5 h-3.5 text-sky-600" />}
                             </div>
-                            <audio
-                              src={msg.attachmentData}
-                              controls
-                              preload="metadata"
-                              className="w-full h-9"
-                            />
                           </div>
-                        )}
 
-                      {msg.attachmentData &&
-                        !msg.attachmentType?.startsWith('image/') &&
-                        !isVideoFile(msg.attachmentName, msg.attachmentType) &&
-                        !isAudioFile(msg.attachmentName, msg.attachmentType) && (
-                          <a
-                            href={msg.attachmentData}
-                            download={msg.attachmentName || 'attachment'}
-                            className="mb-2 p-2.5 rounded-xl bg-white/90 border border-[#E5E7EB] flex items-center justify-between gap-3 hover:bg-white transition-colors"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-[#EAF3ED] text-[#176B37] flex items-center justify-center shrink-0">
-                                <FileText className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="font-bold text-xs text-[#252525] truncate">{msg.attachmentName}</p>
-                                <p className="text-[10px] text-gray-400">{msg.attachmentSize || 'Document'}</p>
-                              </div>
-                            </div>
-                            <Download className="w-4 h-4 text-[#176B37] shrink-0" />
-                          </a>
-                        )}
-
-                      {/* Message Text with @Tag Highlighting */}
-                      <p className="text-xs sm:text-[13px] text-[#252525] leading-relaxed whitespace-pre-wrap break-words">
-                        {renderFormattedMessageText(msg.text, isOwn)}
-                      </p>
-
-                      {/* Timestamp + Read Ticks + Quick Actions Row */}
-                      <div className="flex flex-wrap items-center justify-between gap-3 mt-1.5 pt-1 border-t border-black/5">
-                        {/* Like, React & Reply Buttons */}
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleLike(msg)}
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold transition-colors cursor-pointer ${
-                              isLikedByMe
-                                ? 'bg-red-50 text-red-600 border border-red-200'
-                                : 'bg-black/5 text-gray-600 hover:bg-black/10'
-                            }`}
-                            title="Like comment"
-                          >
-                            <Heart className={`w-3 h-3 ${isLikedByMe ? 'fill-red-500 text-red-500' : ''}`} />
-                            <span>{likes.length > 0 ? likes.length : 'Like'}</span>
-                          </button>
-
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={() => setOpenPickerMsgId(openPickerMsgId === msg.id ? null : msg.id)}
-                              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/5 text-gray-600 hover:bg-black/10 cursor-pointer"
-                              title="React with emoji"
-                            >
-                              <Smile className="w-3 h-3" />
-                              <span>React</span>
-                            </button>
-
-                            {openPickerMsgId === msg.id && (
-                              <div className="absolute bottom-full left-0 mb-1.5 bg-white border border-[#E5E7EB] rounded-full shadow-lg px-2 py-1 flex items-center gap-1 z-30">
-                                {REACTION_EMOJIS.map((emoji) => (
+                          {/* Aggregated Emoji Reaction Pills */}
+                          {Object.keys(reactions).length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                              {Object.entries(reactions).map(([emoji, users]) => {
+                                const userList = Array.isArray(users) ? users : [];
+                                if (userList.length === 0) return null;
+                                const reacted = userList.includes(currentUser.id);
+                                return (
                                   <button
                                     key={emoji}
                                     type="button"
                                     onClick={() => handleToggleReaction(msg, emoji)}
-                                    className="w-7 h-7 rounded-full hover:bg-[#EAF3ED] flex items-center justify-center text-sm cursor-pointer transition-transform hover:scale-110"
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border cursor-pointer transition-colors ${
+                                      reacted
+                                        ? 'bg-[#176B37] text-white border-[#176B37]'
+                                        : 'bg-white text-gray-700 border-[#E5E7EB] hover:bg-[#EAF3ED]'
+                                    }`}
                                   >
-                                    {emoji}
+                                    <span>{emoji}</span>
+                                    <span>{userList.length}</span>
                                   </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setReplyingTo(msg);
-                              inputRef.current?.focus();
-                            }}
-                            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-black/5 text-gray-600 hover:bg-black/10 cursor-pointer"
-                            title="Reply to comment"
-                          >
-                            <Reply className="w-3 h-3" />
-                            <span>Reply</span>
-                          </button>
-                        </div>
-
-                        {/* Time & Checkmarks */}
-                        <div className="flex items-center gap-1 text-[10px] text-gray-500 ml-auto">
-                          <span>{msg.timestampLabel}</span>
-                          {isOwn && <CheckCheck className="w-3.5 h-3.5 text-sky-600" />}
-                        </div>
-                      </div>
-
-                      {/* Aggregated Emoji Reaction Pills */}
-                      {Object.keys(reactions).length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                          {Object.entries(reactions).map(([emoji, users]) => {
-                            const userList = Array.isArray(users) ? users : [];
-                            if (userList.length === 0) return null;
-                            const reacted = userList.includes(currentUser.id);
-                            return (
-                              <button
-                                key={emoji}
-                                type="button"
-                                onClick={() => handleToggleReaction(msg, emoji)}
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border cursor-pointer transition-colors ${
-                                  reacted
-                                    ? 'bg-[#176B37] text-white border-[#176B37]'
-                                    : 'bg-white text-gray-700 border-[#E5E7EB] hover:bg-[#EAF3ED]'
-                                }`}
-                              >
-                                <span>{emoji}</span>
-                                <span>{userList.length}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
+
+                    {isOwn && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPreviewAvatar({
+                            src: avatarSrc,
+                            name: msg.senderName,
+                            role: msg.senderRole,
+                            badge: currentUser.badge,
+                          })
+                        }
+                        title={`View ${msg.senderName}'s profile picture`}
+                        aria-label={`View ${msg.senderName}'s profile picture`}
+                        className="w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border border-emerald-300 bg-[#176B37] text-white flex items-center justify-center font-bold text-[11px] shrink-0 shadow-2xs cursor-pointer hover:ring-2 hover:ring-[#176B37]/60 transition-all"
+                      >
+                        {avatarSrc ? (
+                          <>
+                            <img
+                              src={avatarSrc}
+                              alt={msg.senderName}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                                if (fallback) {
+                                  fallback.classList.remove('hidden');
+                                  fallback.classList.add('flex');
+                                }
+                              }}
+                              className="w-full h-full object-cover object-top"
+                              referrerPolicy="no-referrer"
+                            />
+                            <span className="hidden w-full h-full items-center justify-center">
+                              {getInitials(msg.senderName)}
+                            </span>
+                          </>
+                        ) : (
+                          <span>{getInitials(msg.senderName)}</span>
+                        )}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -2209,7 +2718,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
             </div>
 
             {/* Composer Area (Bottom) */}
-            <div className="bg-[#F0F2F5] border-t border-[#E5E7EB] p-2.5 sm:p-3 relative shrink-0">
+            <div className="bg-[#F0F2F5] border-t border-[#E5E7EB] p-2 sm:p-3 relative shrink-0">
               {/* @ Mention Autocomplete Dropdown */}
               {mentionQuery !== null && mentionSuggestions.length > 0 && (
                 <div className="absolute bottom-full left-3 right-3 sm:right-auto sm:w-80 mb-2 bg-white rounded-2xl shadow-2xl border border-[#E5E7EB] overflow-hidden z-40">
@@ -2339,22 +2848,22 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
               )}
 
               {/* Input Row */}
-              <form onSubmit={(e) => handleSendChat(e)} className="flex items-center gap-1.5 sm:gap-2">
+              <form onSubmit={(e) => handleSendChat(e)} className="flex items-center gap-1 sm:gap-2">
                 <button
                   type="button"
                   onClick={() => setShowEmojiComposer(!showEmojiComposer)}
-                  className="p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
+                  className="p-1.5 sm:p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
                   title="Insert emoji"
                 >
-                  <Smile className="w-5 h-5" />
+                  <Smile className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
 
                 {/* Upload from Device (Videos, Photos, Audio & Documents) */}
                 <label
-                  className="p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
+                  className="p-1.5 sm:p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
                   title="Upload photo, video, audio or document from device"
                 >
-                  <Paperclip className="w-5 h-5" />
+                  <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
                   <input
                     type="file"
                     accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.csv,.xlsx"
@@ -2365,10 +2874,10 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
 
                 {/* Quick Video Upload from Device */}
                 <label
-                  className="p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
+                  className="p-1.5 sm:p-2 rounded-full text-gray-600 hover:text-[#176B37] hover:bg-white transition-colors cursor-pointer shrink-0"
                   title="Upload video from device (MP4, WebM, MOV up to 25MB)"
                 >
-                  <Film className="w-5 h-5" />
+                  <Film className="w-4 h-4 sm:w-5 sm:h-5" />
                   <input
                     type="file"
                     accept="video/*"
@@ -2387,7 +2896,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                     setMentionQuery('');
                     inputRef.current?.focus();
                   }}
-                  className="p-2 rounded-full text-[#176B37] bg-[#EAF3ED] hover:bg-emerald-100 transition-colors cursor-pointer shrink-0"
+                  className="p-1.5 sm:p-2 rounded-full text-[#176B37] bg-[#EAF3ED] hover:bg-emerald-100 transition-colors cursor-pointer shrink-0"
                   title="Tag a member with @"
                 >
                   <AtSign className="w-4 h-4" />
@@ -2398,13 +2907,13 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                   type="text"
                   value={draftText}
                   onChange={handleDraftChange}
-                  placeholder={`Message ${activeChannel.name} (type @ to tag)...`}
-                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-full bg-white border border-[#E5E7EB] text-xs sm:text-sm focus:outline-hidden focus:border-[#176B37]"
+                  placeholder={`Message ${activeChannel.name}...`}
+                  className="flex-1 min-w-0 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-full bg-white border border-[#E5E7EB] text-xs sm:text-sm font-semibold text-[#111827] focus:outline-hidden focus:border-[#176B37]"
                 />
 
                 <button
                   type="submit"
-                  className="w-10 h-10 rounded-full bg-[#176B37] hover:bg-[#14532D] text-white flex items-center justify-center shrink-0 shadow-xs transition-colors cursor-pointer"
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#176B37] hover:bg-[#14532D] text-white flex items-center justify-center shrink-0 shadow-xs transition-colors cursor-pointer"
                   title="Send message"
                 >
                   <Send className="w-4 h-4" />
@@ -2419,7 +2928,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
       {/* TAB 2: ONLINE MEETINGS SECTION                                    */}
       {/* ================================================================= */}
       {activeTab === 'meetings' && (
-        <div className="flex-1 p-4 sm:p-6 bg-[#F9FBFA] overflow-y-auto space-y-5 min-h-[540px]">
+        <div className="flex-1 p-3 sm:p-6 bg-[#F9FBFA] overflow-y-auto space-y-5 min-h-0">
           {/* Active Live Meeting Room Stage */}
           {activeMeeting ? (
             <div className="space-y-4 animate-in fade-in duration-150">
@@ -2896,7 +3405,7 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                 </div>
 
                 {/* Right 4 Cols: Live In-Meeting Chat & Participants */}
-                <div className="lg:col-span-4 bg-white rounded-2xl border border-[#E5E7EB] flex flex-col h-[430px] overflow-hidden">
+                <div className="lg:col-span-4 bg-white rounded-2xl border border-[#E5E7EB] flex flex-col h-[380px] sm:h-[430px] overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-[#EAF3ED]/50">
                     <span className="font-bold text-xs text-[#14532D] flex items-center gap-1.5">
                       <MessageSquare className="w-3.5 h-3.5 text-[#176B37]" />
@@ -2909,17 +3418,181 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
 
                   <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-[#EFEAE2]/40">
                     {messages
-                      .filter((m) => m.channelId === `meeting-${activeMeeting.id}` || m.channelId === 'national-hub')
-                      .slice(-15)
-                      .map((m) => (
-                        <div key={m.id} className="bg-white p-2.5 rounded-xl border border-[#E5E7EB] text-xs shadow-2xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-[11px] text-[#176B37] truncate">{m.senderName}</span>
-                            <span className="text-[9px] text-gray-400 shrink-0">{m.timestampLabel}</span>
+                      .filter(
+                        (m) =>
+                          (m.channelId === `meeting-${activeMeeting.id}` || m.channelId === 'national-hub') &&
+                          !isMessageHiddenForMe(m)
+                      )
+                      .slice(-20)
+                      .map((m) => {
+                        const avatarSrc = resolveMessageAvatar(m);
+                        const isOwnMeetingMsg =
+                          m.senderId === currentUser.id || m.senderName === currentUser.name;
+                        const isRemovedOrWithdrawn = Boolean(m.removedByAdmin || m.deletedByAuthor);
+                        return (
+                          <div key={m.id} className="bg-white p-2.5 rounded-xl border border-[#E5E7EB] text-xs shadow-2xs flex items-start gap-2 relative">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewAvatar({
+                                  src: avatarSrc,
+                                  name: m.senderName,
+                                  role: m.senderRole,
+                                  badge: isOwnMeetingMsg ? currentUser.badge : undefined,
+                                })
+                              }
+                              title={`View ${m.senderName}'s profile picture`}
+                              aria-label={`View ${m.senderName}'s profile picture`}
+                              className="w-7 h-7 rounded-full overflow-hidden bg-[#EAF3ED] text-[#176B37] border border-[#E5E7EB] flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5 cursor-pointer hover:ring-2 hover:ring-[#176B37]/60 transition-all"
+                            >
+                              {avatarSrc ? (
+                                <>
+                                  <img
+                                    src={avatarSrc}
+                                    alt={m.senderName}
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                      const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                                      if (fallback) {
+                                        fallback.classList.remove('hidden');
+                                        fallback.classList.add('flex');
+                                      }
+                                    }}
+                                    className="w-full h-full object-cover object-top"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <span className="hidden w-full h-full items-center justify-center">
+                                    {getInitials(m.senderName)}
+                                  </span>
+                                </>
+                              ) : (
+                                <span>{getInitials(m.senderName)}</span>
+                              )}
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-bold text-[11px] text-[#176B37] truncate">{m.senderName}</span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {m.edited && !isRemovedOrWithdrawn && (
+                                    <span className="text-[9px] italic text-gray-400">edited</span>
+                                  )}
+                                  <span className="text-[9px] text-gray-400">{m.timestampLabel}</span>
+                                  {isOwnMeetingMsg && !isRemovedOrWithdrawn && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStartEdit(m)}
+                                      className="p-0.5 text-gray-400 hover:text-[#176B37] cursor-pointer"
+                                      title="Edit message"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDeleteMenuMsgId(deleteMenuMsgId === m.id ? null : m.id)
+                                    }
+                                    className="p-0.5 text-gray-400 hover:text-red-600 cursor-pointer"
+                                    title="Delete message options"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {isRemovedOrWithdrawn ? (
+                                <p className="text-[11px] italic text-gray-500 mt-1">
+                                  {m.removedByAdmin
+                                    ? `Removed by AMMON Moderator (${m.removedByAdminName || 'Admin'}).`
+                                    : `Withdrawn by ${isOwnMeetingMsg ? 'you' : m.senderName}.`}
+                                </p>
+                              ) : editingMessageId === m.id ? (
+                                <div className="mt-1.5 space-y-1.5">
+                                  <input
+                                    type="text"
+                                    value={editingText}
+                                    onChange={(e) => setEditingText(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveEdit(m);
+                                      } else if (e.key === 'Escape') {
+                                        handleCancelEdit();
+                                      }
+                                    }}
+                                    autoFocus
+                                    className="w-full px-2 py-1 rounded-lg border border-[#176B37] text-xs focus:outline-hidden"
+                                  />
+                                  <div className="flex justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={handleCancelEdit}
+                                      className="px-2 py-0.5 rounded bg-gray-100 text-[10px] font-bold text-gray-600 cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveEdit(m)}
+                                      className="px-2 py-0.5 rounded bg-[#176B37] text-[10px] font-bold text-white cursor-pointer"
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-[13px] font-bold text-[#111827] mt-0.5 break-words">{m.text}</p>
+                              )}
+
+                              {deleteMenuMsgId === m.id && (
+                                <div className="mt-2 p-2 rounded-xl bg-gray-50 border border-[#E5E7EB] space-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteForMe(m)}
+                                    className="w-full px-2 py-1 rounded-lg hover:bg-white text-[10px] font-bold text-gray-700 flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <EyeOff className="w-3 h-3" />
+                                    <span>Delete for Me (hide only for me)</span>
+                                  </button>
+                                  {isOwnMeetingMsg && !isRemovedOrWithdrawn && !canModerateAll && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleWithdrawOwnPost(m)}
+                                      className="w-full px-2 py-1 rounded-lg hover:bg-amber-50 text-[10px] font-bold text-amber-800 flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      <span>Withdraw My Post</span>
+                                    </button>
+                                  )}
+                                  {canModerateAll && !m.removedByAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAdminRemoveUnwantedPost(m)}
+                                      className="w-full px-2 py-1 rounded-lg hover:bg-amber-50 text-[10px] font-bold text-amber-800 flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                      <ShieldAlert className="w-3 h-3" />
+                                      <span>Delete Unwanted Post (Admin)</span>
+                                    </button>
+                                  )}
+                                  {canPermanentDelete && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDeleteMenuMsgId(null);
+                                        setPermanentConfirmMsg(m);
+                                      }}
+                                      className="w-full px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-[10px] font-bold text-red-700 flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                      <AlertTriangle className="w-3 h-3" />
+                                      <span>Delete for All (Permanent)</span>
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-gray-700 mt-0.5 break-words">{m.text}</p>
-                        </div>
-                      ))}
+                        );
+                      })}
                   </div>
 
                   <form
@@ -3256,6 +3929,136 @@ export const SocialSpaceWorkspace: React.FC<SocialSpaceWorkspaceProps> = ({
                 className="max-h-[75vh] w-auto mx-auto object-contain rounded-lg mt-2"
               />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Profile Picture Lightbox Viewer Modal */}
+      {previewAvatar && (
+        <div
+          onClick={() => setPreviewAvatar(null)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Profile picture of ${previewAvatar.name}`}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm bg-white rounded-2xl border border-[#E5E7EB] shadow-2xl overflow-hidden flex flex-col"
+          >
+            <div className="bg-[#14532D] text-white px-4 py-3 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h4 className="font-bold text-sm truncate">{previewAvatar.name}</h4>
+                <p className="text-[11px] text-emerald-200 truncate">
+                  {[previewAvatar.role, previewAvatar.badge].filter(Boolean).join(' • ') || 'AMMON Community Member'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewAvatar(null)}
+                className="p-1.5 rounded-lg text-white/85 hover:text-white hover:bg-white/10 cursor-pointer shrink-0"
+                aria-label="Close profile picture viewer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 flex flex-col items-center justify-center bg-[#F9FBFA] gap-3">
+              {previewAvatar.src ? (
+                <img
+                  src={previewAvatar.src}
+                  alt={previewAvatar.name}
+                  className="w-64 h-64 sm:w-72 sm:h-72 rounded-2xl object-cover object-top border border-[#E5E7EB] shadow-md bg-white"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-52 h-52 rounded-full bg-[#EAF3ED] border-4 border-[#176B37]/25 text-[#176B37] flex flex-col items-center justify-center shadow-inner">
+                  <span className="font-extrabold text-5xl">{getInitials(previewAvatar.name)}</span>
+                  <span className="text-[11px] font-semibold text-gray-500 mt-2">
+                    No profile photo uploaded yet
+                  </span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setPreviewAvatar(null)}
+                className="w-full py-2.5 rounded-xl bg-[#176B37] hover:bg-[#14532D] text-white text-xs font-bold cursor-pointer transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Super Admin Permanent Deletion Confirmation Modal */}
+      {permanentConfirmMsg && canPermanentDelete && (
+        <div
+          onClick={() => !isDeletingPermanent && setPermanentConfirmMsg(null)}
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-white rounded-2xl border border-red-200 shadow-2xl overflow-hidden text-left"
+          >
+            <div className="bg-red-700 text-white px-5 py-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-200" />
+                <h4 className="font-extrabold text-sm">Super Admin Permanent Delete</h4>
+              </div>
+              <button
+                type="button"
+                disabled={isDeletingPermanent}
+                onClick={() => setPermanentConfirmMsg(null)}
+                className="text-white/80 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs sm:text-sm text-[#252525] leading-relaxed">
+                You are about to <strong>permanently delete</strong> this post by{' '}
+                <strong>{permanentConfirmMsg.senderName}</strong> for <strong>all users</strong>,
+                including any attached photo, video, audio, or document in AMMON Storage.
+              </p>
+              {permanentConfirmMsg.attachmentName && (
+                <div className="p-2.5 rounded-xl bg-red-50 border border-red-100 text-[11px] text-red-800 font-semibold">
+                  Media file to be permanently erased: {permanentConfirmMsg.attachmentName}
+                </div>
+              )}
+              <p className="text-[11px] text-gray-500">
+                This action is logged to the Immutable Executive Audit Trail and cannot be undone.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingPermanent}
+                  onClick={() => setPermanentConfirmMsg(null)}
+                  className="px-4 py-2 rounded-xl border border-[#E5E7EB] text-xs font-bold text-gray-700 hover:bg-gray-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingPermanent}
+                  onClick={handleConfirmPermanentDelete}
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
+                >
+                  {isDeletingPermanent ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Permanently for All</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

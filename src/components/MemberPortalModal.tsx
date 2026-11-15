@@ -30,7 +30,9 @@ import {
   Copy,
   Check,
   MessageSquare,
-  Video
+  Video,
+  Camera,
+  Loader2,
 } from 'lucide-react';
 import { Member, DisputeTicket, SocialMessage, OnlineMeeting } from '../types';
 import { QRCodeSvg } from './QRCodeSvg';
@@ -41,6 +43,8 @@ import {
   ServiceSectionId,
 } from './DashboardServicesWorkspace';
 import { SocialSpaceWorkspace } from './SocialSpaceWorkspace';
+import { processProfileAvatar } from '../utils/imageProcessor';
+import { uploadProfileAvatarAsset } from '../services/storageService';
 import { 
   downloadDigitalCardPng, 
   printDigitalCardDocument, 
@@ -78,6 +82,7 @@ interface MemberPortalModalProps {
   onUpdateMessage?: (id: string, updates: Partial<SocialMessage>) => void;
   onCreateMeeting?: (meeting: OnlineMeeting) => void;
   onUpdateMeeting?: (id: string, updates: Partial<OnlineMeeting>) => void;
+  onUpdateProfilePhoto?: (photoUrl: string, storagePath?: string) => Promise<void> | void;
 }
 
 export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
@@ -93,6 +98,7 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
   onUpdateMessage = () => {},
   onCreateMeeting = () => {},
   onUpdateMeeting = () => {},
+  onUpdateProfilePhoto,
 }) => {
   const [activeSection, setActiveSection] = useState<DashboardSection>(initialSection);
 
@@ -103,6 +109,9 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
   const [cardFlipped, setCardFlipped] = useState(false);
   const [isDownloadingCard, setIsDownloadingCard] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarNotice, setAvatarNotice] = useState('');
+  const [avatarError, setAvatarError] = useState('');
 
   // Academy course progress state
   const [completedAcademyCourses, setCompletedAcademyCourses] = useState<number[]>([1, 2]);
@@ -111,6 +120,36 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
   const [disputeIssue, setDisputeIssue] = useState('Illegal LGA Levy');
   const [disputeDesc, setDisputeDesc] = useState('');
   const [disputeSubmitted, setDisputeSubmitted] = useState(false);
+
+  const handleProfilePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setAvatarError('');
+    setAvatarNotice('');
+    setIsUploadingAvatar(true);
+
+    try {
+      const processed = await processProfileAvatar(file);
+      const uploaded = await uploadProfileAvatarAsset({
+        blob: processed.blob,
+        userId: member.id,
+        fileName: `${member.membershipId}_avatar.jpg`,
+        dataUrl: processed.dataUrl,
+      });
+
+      await onUpdateProfilePhoto?.(uploaded.url, uploaded.storagePath);
+      setAvatarNotice('Profile & chat display photo updated.');
+      setTimeout(() => setAvatarNotice(''), 4000);
+    } catch (err) {
+      setAvatarError(
+        err instanceof Error ? err.message : 'Unable to upload profile photo. Please try a JPG or PNG image.'
+      );
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -188,11 +227,11 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
   const txCount = member.category === 'Super Agents' ? '1,420' : member.category === 'Fintech Companies' ? '8,950' : member.id === 'mem-3' ? '215' : member.id === 'mem-4' ? '410' : '342';
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 overflow-hidden">
+    <div className="fixed inset-0 h-dvh z-50 flex bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 overflow-hidden">
       
       {/* Full-view Portal Container */}
       <div 
-        className="w-full h-full bg-[#FFFFFF] flex flex-col md:flex-row overflow-hidden shadow-2xl relative"
+        className="w-full h-full bg-[#FFFFFF] flex flex-col md:flex-row overflow-hidden shadow-2xl relative min-h-0"
         onClick={(e) => e.stopPropagation()}
       >
         
@@ -228,8 +267,11 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
 
             {/* Member Profile Card inside Sidebar */}
             <div className="mt-4 pt-3 border-t border-white/15 flex items-center gap-3">
-              <div className="relative shrink-0">
-                <div className="w-11 h-11 rounded-xl overflow-hidden border-2 border-white/40 shadow-xs bg-emerald-950">
+              <label
+                className="relative shrink-0 cursor-pointer group"
+                title="Upload profile photo for dashboard & chat rooms"
+              >
+                <div className="w-12 h-12 rounded-xl overflow-hidden border-2 border-white/40 shadow-xs bg-emerald-950 relative">
                   <img
                     src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
                     alt={member.fullName}
@@ -239,9 +281,29 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                     className="w-full h-full object-cover object-top"
                     referrerPolicy="no-referrer"
                   />
+                  <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                    {isUploadingAvatar ? (
+                      <Loader2 className="w-4 h-4 text-white animate-spin" />
+                    ) : (
+                      <Camera className="w-4 h-4 text-white" />
+                    )}
+                  </div>
                 </div>
-                <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-[#14532D]" />
-              </div>
+                <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white text-[#176B37] border border-[#14532D] flex items-center justify-center shadow-xs">
+                  {isUploadingAvatar ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Camera className="w-3 h-3" />
+                  )}
+                </span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleProfilePhotoChange}
+                  disabled={isUploadingAvatar}
+                  className="hidden"
+                />
+              </label>
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
@@ -505,36 +567,112 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
           </header>
 
           {/* Scrollable Dashboard Viewport */}
-          <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#F9FBFA]/60 min-w-0">
-            <div className={`${activeSection === 'social-space' || activeSection === 'online-meetings' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto space-y-6 min-w-0`}>
+          <main
+            className={`flex-1 bg-[#F9FBFA]/60 min-w-0 min-h-0 ${
+              activeSection === 'social-space' || activeSection === 'online-meetings'
+                ? 'flex flex-col overflow-hidden p-0 sm:p-4'
+                : 'overflow-y-auto p-4 sm:p-8'
+            }`}
+          >
+            <div
+              className={`${
+                activeSection === 'social-space' || activeSection === 'online-meetings'
+                  ? 'max-w-6xl w-full flex-1 flex flex-col min-h-0 mx-auto'
+                  : 'max-w-4xl mx-auto space-y-6'
+              } min-w-0`}
+            >
 
               {/* 1. OVERVIEW & STATISTICS */}
               {activeSection === 'overview' && (
                 <div className="space-y-6 animate-in fade-in duration-150">
                   
-                  {/* Welcome Strip */}
-                  <div className="bg-white p-5 rounded-2xl border border-[#E5E7EB] shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div>
-                      <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">
-                        Welcome Back, Operator
-                      </span>
-                      <h3 className="text-xl font-bold text-[#252525] mt-0.5">
-                        {member.fullName}
-                      </h3>
-                      <p className="text-xs text-gray-600 mt-1">
-                        Outlet: <strong className="text-[#14532D]">{member.businessName}</strong> · Location: <strong>{member.lga}, {member.state} State</strong>
-                      </p>
+                  {/* Welcome & Profile Photo Strip */}
+                  <div className="bg-white p-5 rounded-2xl border border-[#E5E7EB] shadow-xs space-y-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <label
+                          className="relative shrink-0 cursor-pointer group"
+                          title="Upload or change profile & chat photo"
+                        >
+                          <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-[#176B37]/30 shadow-xs bg-[#EAF3ED]">
+                            <img
+                              src={member.photoUrl || '/assets/images/ammon_hero_pos_agent_1794380620175.jpg'}
+                              alt={member.fullName}
+                              onError={(e) => {
+                                e.currentTarget.src = '/assets/images/ammon_hero_pos_agent_1794380620175.jpg';
+                              }}
+                              className="w-full h-full object-cover object-top"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#176B37] text-white border-2 border-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+                            {isUploadingAvatar ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Camera className="w-3.5 h-3.5" />
+                            )}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={handleProfilePhotoChange}
+                            disabled={isUploadingAvatar}
+                            className="hidden"
+                          />
+                        </label>
+
+                        <div className="min-w-0">
+                          <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">
+                            Welcome Back, Operator
+                          </span>
+                          <h3 className="text-xl font-bold text-[#252525] mt-0.5 truncate">
+                            {member.fullName}
+                          </h3>
+                          <p className="text-xs text-gray-600 mt-0.5 truncate">
+                            Outlet: <strong className="text-[#14532D]">{member.businessName}</strong> · Location: <strong>{member.lga}, {member.state} State</strong>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <label className="px-3.5 py-2 rounded-xl border border-[#176B37] text-[#176B37] hover:bg-[#EAF3ED] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
+                          {isUploadingAvatar ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Camera className="w-3.5 h-3.5" />
+                          )}
+                          <span>{isUploadingAvatar ? 'Uploading Photo...' : 'Upload Chat Photo'}</span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={handleProfilePhotoChange}
+                            disabled={isUploadingAvatar}
+                            className="hidden"
+                          />
+                        </label>
+
+                        <button
+                          onClick={() => setActiveSection('id-card')}
+                          className="px-4 py-2 bg-[#176B37] hover:bg-[#14532D] text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>View My ID Card</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setActiveSection('id-card')}
-                        className="px-4 py-2 bg-[#176B37] hover:bg-[#14532D] text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                      >
-                        <CreditCard className="w-3.5 h-3.5" />
-                        <span>View My ID Card</span>
-                      </button>
-                    </div>
+                    {avatarNotice && (
+                      <div className="px-3 py-2 rounded-xl bg-[#EAF3ED] border border-[#176B37]/25 text-xs font-semibold text-[#14532D] flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-[#176B37] shrink-0" />
+                        <span>{avatarNotice} Used automatically in all AMMON Social Chat rooms.</span>
+                      </div>
+                    )}
+
+                    {avatarError && (
+                      <div className="px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-xs font-medium text-red-800">
+                        {avatarError}
+                      </div>
+                    )}
                   </div>
 
                   {/* 3 Core Metric Cards */}
@@ -1234,7 +1372,7 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
 
               {/* 9. AMMON SOCIAL SPACE & ONLINE MEETINGS */}
               {(activeSection === 'social-space' || activeSection === 'online-meetings') && (
-                <div className="animate-in fade-in duration-150 min-w-0">
+                <div className="animate-in fade-in duration-150 min-w-0 flex-1 flex flex-col min-h-0">
                   <SocialSpaceWorkspace
                     currentUser={{
                       id: member.id,
@@ -1242,6 +1380,8 @@ export const MemberPortalModal: React.FC<MemberPortalModalProps> = ({
                       role: member.category === 'Super Agents' ? 'Super Agent' : 'POS Agent',
                       badge: member.membershipId,
                       avatar: member.photoUrl,
+                      isAdmin: false,
+                      isSuperAdmin: false,
                     }}
                     members={members}
                     messages={socialMessages}

@@ -214,6 +214,92 @@ export async function uploadMemberKycAsset(params: {
   throw new Error('Image file is too large for offline fallback. Please capture a clearer smaller photo.');
 }
 
+/**
+ * Upload a user's dashboard profile photo / chat display picture to `profile-photos/{userId}/...`
+ * in the AMMON Firebase Storage bucket, with Express persistent vault and inline fallbacks.
+ */
+export async function uploadProfileAvatarAsset(params: {
+  blob: Blob;
+  userId: string;
+  fileName: string;
+  dataUrl?: string;
+}): Promise<KycUploadResult> {
+  const safeUser = params.userId.replace(/[^a-zA-Z0-9_-]/g, '') || 'user';
+  const safeFile = params.fileName.replace(/[^a-zA-Z0-9._-]/g, '_') || 'avatar.jpg';
+  const fullPath = `profile-photos/${safeUser}/${Date.now()}_${safeFile}`;
+  const contentType = params.blob.type || 'image/jpeg';
+  const resolvedDataUrl = params.dataUrl || (await blobToBase64DataUrl(params.blob));
+
+  // 1. Firebase Storage (`profile-photos/{userId}/...`)
+  try {
+    const fileRef = storageRef(storage, fullPath);
+    const snapshot = await withTimeout(
+      uploadBytes(fileRef, params.blob, {
+        contentType,
+        cacheControl: 'public, max-age=86400',
+        customMetadata: {
+          app: 'AMMON-Nigeria',
+          folder: 'profile-photos',
+          userId: safeUser,
+        },
+      }),
+      7000,
+      'Firebase Storage profile upload'
+    );
+    const downloadUrl = await withTimeout(
+      getDownloadURL(snapshot.ref),
+      5000,
+      'Firebase Storage profile URL lookup'
+    );
+    return {
+      url: downloadUrl,
+      storagePath: fullPath,
+      provider: 'firebase-storage',
+    };
+  } catch (firebaseErr) {
+    console.warn(
+      'Firebase Storage profile photo upload fallback:',
+      firebaseErr instanceof Error ? firebaseErr.message : firebaseErr
+    );
+  }
+
+  // 2. AMMON Express Vault (`/api/uploads/profile-photo`)
+  try {
+    const resp = await fetch('/api/uploads/profile-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: safeUser,
+        fileName: safeFile,
+        dataUrl: resolvedDataUrl,
+      }),
+    });
+    if (resp.ok) {
+      const data = (await resp.json()) as { url?: string; storagePath?: string };
+      if (data?.url) {
+        return {
+          url: data.url,
+          storagePath: data.storagePath || fullPath,
+          provider: 'ammon-vault',
+        };
+      }
+    }
+  } catch (vaultErr) {
+    console.warn('AMMON profile vault fallback:', vaultErr);
+  }
+
+  // 3. Compact inline JPEG fallback
+  if (resolvedDataUrl.length <= 650_000) {
+    return {
+      url: resolvedDataUrl,
+      storagePath: fullPath,
+      provider: 'cloud-firestore-inline',
+    };
+  }
+
+  throw new Error('Profile photo is too large. Please select a clearer smaller photo.');
+}
+
 export interface ChatMediaUploadResult {
   url: string;
   storagePath: string;
@@ -631,5 +717,36 @@ export async function deleteMeetingRecordingAsset(storagePath: string, url?: str
         method: 'DELETE',
       }).catch(() => {});
     }
+  }
+}
+
+/**
+ * Permanently delete a chat message's photo, video, audio, or document attachment from Firebase Storage.
+ * Express vault cleanup (`/api/uploads/chat-media/...`) is handled by the Super Admin backend endpoint.
+ */
+export async function deleteChatMediaAsset(
+  attachmentData?: string,
+  attachmentStoragePath?: string
+): Promise<void> {
+  try {
+    if (attachmentStoragePath && attachmentStoragePath.startsWith('ammon-chat-media/')) {
+      await deleteObject(storageRef(storage, attachmentStoragePath));
+      return;
+    }
+    if (
+      attachmentData &&
+      attachmentData.includes('firebasestorage.googleapis.com') &&
+      attachmentData.includes('ammon-chat-media')
+    ) {
+      const match = attachmentData.match(/\/o\/([^?]+)/);
+      if (match && match[1]) {
+        const decodedPath = decodeURIComponent(match[1]);
+        if (decodedPath.startsWith('ammon-chat-media/')) {
+          await deleteObject(storageRef(storage, decodedPath));
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Chat media Firebase Storage delete note:', err instanceof Error ? err.message : err);
   }
 }

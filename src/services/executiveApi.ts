@@ -386,3 +386,45 @@ export async function updateHierarchyConfigApi(
     body: JSON.stringify({ hierarchyConfig }),
   });
 }
+
+export async function updateMemberProfilePhotoApi(
+  memberId: string,
+  photoUrl: string,
+  passportStoragePath?: string
+): Promise<{ member: Member }> {
+  return apiRequest<{ member: Member }>(
+    `/api/members/${encodeURIComponent(memberId)}/profile-photo`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ photoUrl, passportStoragePath }),
+    },
+    null
+  );
+}
+
+export async function updateExecutiveProfilePhotoApi(
+  avatarUrl: string
+): Promise<{ executive: AdminUser }> {
+  return apiRequest<{ executive: AdminUser }>('/api/executive/profile-photo', {
+    method: 'PATCH',
+    body: JSON.stringify({ avatarUrl }),
+  });
+}
+
+export async function permanentDeleteSocialMessageApi(
+  messageId: string,
+  payload: {
+    attachmentData?: string;
+    attachmentStoragePath?: string;
+    channelId?: string;
+    senderName?: string;
+  }
+): Promise<{ deleted: boolean; deletedMediaFile: boolean }> {
+  return apiRequest<{ deleted: boolean; deletedMediaFile: boolean }>(
+    `/api/social-messages/${encodeURIComponent(messageId)}/permanent`,
+    {
+      method: 'DELETE',
+      body: JSON.stringify(payload),
+    }
+  );
+}

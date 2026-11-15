@@ -24,6 +24,7 @@ import {
   Loader2,
   AlertCircle,
   Film,
+  Camera,
 } from 'lucide-react';
 import {
   AdminUser,
@@ -60,6 +61,8 @@ import { ExecutiveAnnouncementsWorkspace } from './executive/ExecutiveAnnounceme
 import { SuperAdminGovernanceWorkspace } from './executive/SuperAdminGovernanceWorkspace';
 import { AuditTrailWorkspace } from './executive/AuditTrailWorkspace';
 import { SavedRecordingsWorkspace } from './executive/SavedRecordingsWorkspace';
+import { processProfileAvatar } from '../utils/imageProcessor';
+import { uploadProfileAvatarAsset } from '../services/storageService';
 
 export type AdminSection =
   | 'overview'
@@ -93,8 +96,10 @@ interface AdminDashboardModalProps {
   meetings?: OnlineMeeting[];
   onSendMessage?: (msg: SocialMessage) => void;
   onUpdateMessage?: (id: string, updates: Partial<SocialMessage>) => void;
+  onPermanentDeleteMessage?: (msg: SocialMessage) => Promise<void> | void;
   onCreateMeeting?: (meeting: OnlineMeeting) => void;
   onUpdateMeeting?: (id: string, updates: Partial<OnlineMeeting>) => void;
+  onUpdateProfilePhoto?: (avatarUrl: string) => Promise<void> | void;
 }
 
 export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
@@ -113,11 +118,16 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   meetings = [],
   onSendMessage = () => {},
   onUpdateMessage = () => {},
+  onPermanentDeleteMessage,
   onCreateMeeting = () => {},
   onUpdateMeeting = () => {},
+  onUpdateProfilePhoto,
 }) => {
   const [activeSection, setActiveSection] = useState<AdminSection>('overview');
   const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarNotice, setAvatarNotice] = useState('');
+  const [avatarError, setAvatarError] = useState('');
 
   // Backend-authoritative workspace state
   const [workspace, setWorkspace] = useState<ExecutiveWorkspacePayload | null>(null);
@@ -198,6 +208,36 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       });
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleAdminAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAvatarError('');
+    setAvatarNotice('');
+    setIsUploadingAvatar(true);
+    try {
+      const processed = await processProfileAvatar(file);
+      const uploaded = await uploadProfileAvatarAsset({
+        blob: processed.blob,
+        userId: adminUser.id,
+        fileName: `${adminUser.badgeNumber || adminUser.id}_avatar.jpg`,
+        dataUrl: processed.dataUrl,
+      });
+      await onUpdateProfilePhoto?.(uploaded.url);
+      setWorkspace((prev) =>
+        prev ? { ...prev, executive: { ...prev.executive, avatarUrl: uploaded.url } } : prev
+      );
+      setAvatarNotice('Chat photo updated.');
+      setTimeout(() => setAvatarNotice(''), 3500);
+    } catch (err) {
+      setAvatarError(
+        err instanceof Error ? err.message : 'Unable to upload photo. Try JPG or PNG.'
+      );
+    } finally {
+      setIsUploadingAvatar(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -347,9 +387,9 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 overflow-hidden">
+    <div className="fixed inset-0 h-dvh z-50 flex bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 overflow-hidden">
       <div
-        className="w-full h-full bg-[#FFFFFF] flex flex-col md:flex-row overflow-hidden shadow-2xl relative"
+        className="w-full h-full bg-[#FFFFFF] flex flex-col md:flex-row overflow-hidden shadow-2xl relative min-h-0"
         onClick={(e) => e.stopPropagation()}
       >
         {/* LEFT-JUSTIFIED SIDEBAR */}
@@ -386,12 +426,44 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
             {/* Officer Profile Card inside Sidebar */}
             <div className="mt-4 pt-3 border-t border-white/15 flex items-start gap-3">
-              <div className="relative shrink-0">
-                <div className="w-11 h-11 rounded-xl overflow-hidden border-2 border-white/40 shadow-xs bg-emerald-950 flex items-center justify-center">
-                  <Landmark className="w-6 h-6 text-emerald-300" />
+              <label
+                className="relative shrink-0 cursor-pointer group"
+                title="Upload profile photo for chat rooms"
+              >
+                <div className="w-12 h-12 rounded-xl overflow-hidden border-2 border-white/40 shadow-xs bg-emerald-950 flex items-center justify-center relative">
+                  {activeExec.avatarUrl ? (
+                    <img
+                      src={activeExec.avatarUrl}
+                      alt={activeExec.fullName}
+                      className="w-full h-full object-cover object-top"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <Landmark className="w-6 h-6 text-emerald-300" />
+                  )}
+                  <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                    {isUploadingAvatar ? (
+                      <Loader2 className="w-4 h-4 text-white animate-spin" />
+                    ) : (
+                      <Camera className="w-4 h-4 text-white" />
+                    )}
+                  </div>
                 </div>
-                <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-[#14532D]" />
-              </div>
+                <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white text-[#176B37] border border-[#14532D] flex items-center justify-center shadow-xs">
+                  {isUploadingAvatar ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Camera className="w-3 h-3" />
+                  )}
+                </span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleAdminAvatarChange}
+                  disabled={isUploadingAvatar}
+                  className="hidden"
+                />
+              </label>
 
               <div className="flex-1 min-w-0">
                 <h4 className="font-bold text-xs text-white truncate leading-tight">
@@ -415,9 +487,29 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                   >
                     {execLevel.replace('_', ' ')}
                   </span>
+                  <label className="text-[9px] font-semibold text-emerald-200 hover:text-white underline cursor-pointer ml-0.5">
+                    {isUploadingAvatar ? 'Saving...' : 'Chat Photo'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleAdminAvatarChange}
+                      disabled={isUploadingAvatar}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
               </div>
             </div>
+            {avatarNotice && (
+              <p className="mt-2 text-[10px] font-semibold text-emerald-200 bg-white/10 rounded px-2 py-1">
+                {avatarNotice}
+              </p>
+            )}
+            {avatarError && (
+              <p className="mt-2 text-[10px] font-semibold text-red-200 bg-red-900/40 rounded px-2 py-1">
+                {avatarError}
+              </p>
+            )}
           </div>
 
           {/* Left-Justified Navigation Menu List */}
@@ -767,13 +859,19 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           </header>
 
           {/* Scrollable Viewport */}
-          <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#F9FBFA]/60 min-w-0">
+          <main
+            className={`flex-1 bg-[#F9FBFA]/60 min-w-0 ${
+              activeSection === 'social-space' || activeSection === 'online-meetings'
+                ? 'flex flex-col overflow-hidden p-0 sm:p-4'
+                : 'overflow-y-auto p-4 sm:p-8'
+            }`}
+          >
             <div
               className={`${
                 activeSection === 'social-space' || activeSection === 'online-meetings'
-                  ? 'max-w-6xl'
-                  : 'max-w-5xl'
-              } mx-auto space-y-6 min-w-0`}
+                  ? 'max-w-6xl w-full flex-1 flex flex-col min-h-0'
+                  : 'max-w-5xl space-y-6'
+              } mx-auto min-w-0`}
             >
               {workspaceLoading && (
                 <div className="p-3 rounded-xl bg-[#EAF3ED] border border-[#176B37]/30 text-xs text-[#14532D] flex items-center gap-2">
@@ -1240,7 +1338,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
               {/* 12. AMMON SOCIAL SPACE & ONLINE MEETINGS */}
               {(activeSection === 'social-space' || activeSection === 'online-meetings') && (
-                <div className="animate-in fade-in duration-150 min-w-0">
+                <div className="animate-in fade-in duration-150 min-w-0 flex-1 flex flex-col min-h-0">
                   <SocialSpaceWorkspace
                     currentUser={{
                       id: activeExec.id,
@@ -1248,12 +1346,15 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                       role: `${activeExec.role} (${activeExec.jurisdiction})`,
                       badge: activeExec.badgeNumber,
                       avatar: activeExec.avatarUrl,
+                      isAdmin: true,
+                      isSuperAdmin: isSuperAdmin,
                     }}
                     members={scopedMembers}
                     messages={socialMessages}
                     meetings={meetings}
                     onSendMessage={onSendMessage}
                     onUpdateMessage={onUpdateMessage}
+                    onPermanentDeleteMessage={isSuperAdmin ? onPermanentDeleteMessage : undefined}
                     onCreateMeeting={onCreateMeeting}
                     onUpdateMeeting={onUpdateMeeting}
                     initialTab={activeSection === 'online-meetings' ? 'meetings' : 'chat'}

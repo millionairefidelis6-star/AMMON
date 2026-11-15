@@ -22,6 +22,7 @@ const AUDIT_ACTIONS: AuditActionType[] = [
   'REPORT_SUBMITTED',
   'REPORT_REVIEWED',
   'HIERARCHY_UPDATED',
+  'CHAT_MESSAGE_PERMANENT_DELETE',
 ];
 
 export const AuditTrailWorkspace: React.FC<AuditTrailWorkspaceProps> = ({

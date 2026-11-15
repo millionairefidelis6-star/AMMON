@@ -150,6 +150,12 @@ service cloud.firestore {
           existing().emailVerified != true &&
           incoming().emailVerified == true &&
           incoming().diff(existing()).affectedKeys().hasOnly(['emailVerified', 'emailVerifiedAt', 'otpHash', 'otpExpiresAt'])
+        ) ||
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['photoUrl', 'passportStoragePath']) &&
+          incoming().photoUrl is string &&
+          incoming().photoUrl.size() > 0 &&
+          incoming().photoUrl.size() <= 700000
         )
       );
       allow delete: if isSuperAdmin();
@@ -244,12 +250,14 @@ service cloud.firestore {
       allow get, list: if true;
       allow create: if isValidId(messageId)
         && incoming().channelId is string
+        && incoming().channelId.size() <= 128
         && incoming().senderName is string
         && incoming().senderName.size() <= 128
         && incoming().text is string
         && incoming().text.size() <= 4096;
-      allow update: if isValidId(messageId);
-      allow delete: if isAdmin();
+      allow update: if isValidId(messageId)
+        && (!('text' in incoming()) || (incoming().text is string && incoming().text.size() <= 4096));
+      allow delete: if isSuperAdmin();
     }
 
     // 12. AMMON Online Meetings & Townhalls

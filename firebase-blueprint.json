@@ -246,6 +246,13 @@
         "attachmentType": { "type": "string", "maxLength": 128 },
         "attachmentSize": { "type": "string", "maxLength": 64 },
         "attachmentData": { "type": "string", "maxLength": 850000 },
+        "attachmentStoragePath": { "type": "string", "maxLength": 512 },
+        "edited": { "type": "boolean" },
+        "editedAtMs": { "type": "number" },
+        "deletedByAuthor": { "type": "boolean" },
+        "removedByAdmin": { "type": "boolean" },
+        "removedByAdminName": { "type": "string", "maxLength": 128 },
+        "permanentlyDeleted": { "type": "boolean" },
         "timestampLabel": { "type": "string", "maxLength": 32 },
         "createdAtMs": { "type": "number" }
       },

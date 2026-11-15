@@ -260,7 +260,8 @@ export type AuditActionType =
   | 'ANNOUNCEMENT_PUBLISHED'
   | 'REPORT_SUBMITTED'
   | 'REPORT_REVIEWED'
-  | 'HIERARCHY_UPDATED';
+  | 'HIERARCHY_UPDATED'
+  | 'CHAT_MESSAGE_PERMANENT_DELETE';
 
 export interface AuditLogEntry {
   id: string;
@@ -320,6 +321,7 @@ export interface SocialMessage {
   attachmentType?: string;
   attachmentSize?: string;
   attachmentData?: string;
+  attachmentStoragePath?: string;
   replyToId?: string;
   replyToSender?: string;
   replyToText?: string;
@@ -327,6 +329,16 @@ export interface SocialMessage {
   reactions: Record<string, string[]>;
   timestampLabel: string;
   createdAtMs: number;
+  edited?: boolean;
+  editedAtMs?: number;
+  deletedForUserIds?: string[];
+  deletedByAuthor?: boolean;
+  deletedByAuthorAtMs?: number;
+  removedByAdmin?: boolean;
+  removedByAdminName?: string;
+  removedByAdminId?: string;
+  removedAtMs?: number;
+  permanentlyDeleted?: boolean;
 }
 
 export interface MeetingRecording {

@@ -1628,6 +1628,85 @@ async function createAppServer() {
     }
   });
 
+  // Upload user dashboard profile / chat display picture into Express persistent vault fallback
+  app.post('/api/uploads/profile-photo', (req, res) => {
+    try {
+      const { userId, fileName, dataUrl } = req.body || {};
+      if (typeof dataUrl !== 'string' || !/^data:image\/[^;]+;base64,/i.test(dataUrl)) {
+        res.status(400).json({ error: 'Valid base64 JPEG, PNG, or WebP profile image is required.' });
+        return;
+      }
+
+      const commaIdx = dataUrl.indexOf(',');
+      const mimeMatch = dataUrl.slice(0, commaIdx).match(/^data:([^;]+);base64$/i);
+      const mimeType = mimeMatch ? mimeMatch[1].toLowerCase() : 'image/jpeg';
+      const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+      const base64Data = dataUrl.slice(commaIdx + 1).replace(/\s+/g, '');
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      if (!buffer.length || buffer.length > 5 * 1024 * 1024) {
+        res.status(400).json({ error: 'Uploaded profile image exceeds 5 MB limit or is empty.' });
+        return;
+      }
+
+      const safeUser = String(userId || 'user').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || 'user';
+      const baseSafe = String(fileName || 'avatar')
+        .replace(/\.[a-zA-Z0-9]+$/, '')
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .slice(0, 32);
+      const storedName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${safeUser}_${baseSafe}.${ext}`;
+      const targetDir = path.join(uploadsRoot, 'profile-photos');
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(path.join(targetDir, storedName), buffer);
+
+      res.status(201).json({
+        url: `/api/uploads/profile-photos/${storedName}`,
+        storagePath: `profile-photos/${safeUser}/${storedName}`,
+      });
+    } catch (err) {
+      console.error('Profile photo write error:', err);
+      res.status(500).json({ error: 'Server failed to persist uploaded profile photo.' });
+    }
+  });
+
+  // Persist uploaded profile photo for a Member Operator (used across ID card & Social Chat rooms)
+  app.patch('/api/members/:id/profile-photo', (req, res) => {
+    const { photoUrl, passportStoragePath } = req.body || {};
+    if (typeof photoUrl !== 'string' || !photoUrl.trim() || photoUrl.length > 700_000) {
+      res.status(400).json({ error: 'A valid profile photo URL or compact image data is required.' });
+      return;
+    }
+
+    const member = ammonStore.getData().members.find((m) => m.id === req.params.id || m.membershipId === req.params.id);
+    if (!member) {
+      res.status(404).json({ error: 'Member record not found.' });
+      return;
+    }
+
+    member.photoUrl = photoUrl.trim();
+    if (typeof passportStoragePath === 'string' && passportStoragePath.trim()) {
+      member.passportStoragePath = passportStoragePath.trim();
+    }
+    ammonStore.save();
+
+    res.json({ member: sanitizeMember(member) });
+  });
+
+  // Persist uploaded profile photo for an Executive / Admin user
+  app.patch('/api/executive/profile-photo', requireExecutiveAuth, (req: AuthedRequest, res) => {
+    const exec = req.executive!;
+    const { avatarUrl } = req.body || {};
+    if (typeof avatarUrl !== 'string' || !avatarUrl.trim() || avatarUrl.length > 700_000) {
+      res.status(400).json({ error: 'A valid executive profile photo URL or image data is required.' });
+      return;
+    }
+
+    exec.avatarUrl = avatarUrl.trim();
+    ammonStore.save();
+
+    res.json({ executive: sanitizeExecutive(exec) });
+  });
+
   // Raw binary upload for Social Space videos, voice/audio notes, photos & documents (up to 25 MB)
   app.post(
     '/api/uploads/chat-media',
@@ -1675,6 +1754,57 @@ async function createAppServer() {
       }
     }
   );
+
+  // Super Admin-only permanent deletion of chat posts and attached photos/videos from AMMON Vault
+  app.delete('/api/social-messages/:id/permanent', requireExecutiveAuth, (req: AuthedRequest, res) => {
+    const exec = req.executive!;
+    if (exec.level !== 'super_admin' && exec.role !== 'Super Admin') {
+      res.status(403).json({
+        error: 'Only the Super Admin can delete posts for everyone and permanently erase chat photos or videos.',
+      });
+      return;
+    }
+
+    const messageId = String(req.params.id || '').trim();
+    const { attachmentData, attachmentStoragePath, channelId, senderName } = (req.body || {}) as {
+      attachmentData?: string;
+      attachmentStoragePath?: string;
+      channelId?: string;
+      senderName?: string;
+    };
+
+    let deletedMediaFile = false;
+    const candidatePath =
+      typeof attachmentStoragePath === 'string' && attachmentStoragePath.startsWith('chat-media/')
+        ? attachmentStoragePath.replace(/^chat-media\//, '')
+        : typeof attachmentData === 'string' && attachmentData.startsWith('/api/uploads/chat-media/')
+        ? attachmentData.replace(/^\/api\/uploads\/chat-media\//, '')
+        : '';
+
+    if (candidatePath && /^[a-zA-Z0-9._-]+$/.test(candidatePath)) {
+      const targetFile = path.join(uploadsRoot, 'chat-media', candidatePath);
+      if (fs.existsSync(targetFile)) {
+        fs.unlinkSync(targetFile);
+        deletedMediaFile = true;
+      }
+    }
+
+    ammonStore.appendAuditLog({
+      actorId: exec.id,
+      actorName: exec.fullName,
+      actorRole: exec.role,
+      actorLevel: exec.level || 'super_admin',
+      actorJurisdiction: exec.jurisdiction,
+      action: 'CHAT_MESSAGE_PERMANENT_DELETE',
+      affectedRecordId: messageId || 'chat-msg',
+      affectedRecordLabel: `${senderName || 'Participant'} in #${channelId || 'social'}`,
+      details: `Super Admin permanently deleted chat post ${messageId} for all users${
+        deletedMediaFile ? ' and purged attached media file from AMMON storage' : ''
+      }.`,
+    });
+
+    res.json({ deleted: true, deletedMediaFile });
+  });
 
   // Raw binary upload & directory listing for AMMON Online Meeting video recordings ('recordings/' path)
   const handleRecordingUpload = (folderName: 'recordings' | 'meeting-recordings', storagePrefix: string) =>
@@ -1781,7 +1911,7 @@ async function createAppServer() {
     const folder = String(req.params.folder || '');
     const filename = String(req.params.filename || '');
     if (
-      !['member-passports', 'kyc-documents', 'chat-media', 'recordings', 'meeting-recordings'].includes(folder) ||
+      !['member-passports', 'kyc-documents', 'profile-photos', 'chat-media', 'recordings', 'meeting-recordings'].includes(folder) ||
       !/^[a-zA-Z0-9._-]+$/.test(filename)
     ) {
       res.status(400).json({ error: 'Invalid asset path.' });

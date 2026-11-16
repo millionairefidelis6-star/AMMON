@@ -28,7 +28,9 @@ import { Member, AdminUser } from '../types';
 import {
   BOOTSTRAPPED_SUPER_ADMIN_EMAILS,
   db,
+  logOutFirebase,
   sendPasswordReset,
+  signInSuperAdminWithGoogle,
   signInWithFirebasePassword,
 } from '../firebase';
 import { INITIAL_EXECUTIVE_ACCOUNTS } from '../data/hierarchyData';
@@ -89,6 +91,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
 
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   // Forgot Password / Recovery States
@@ -486,6 +489,75 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
   const handleAdminLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await authenticateExecutive(adminEmail, adminPassword);
+  };
+
+  const handleGoogleSuperAdminLogin = async () => {
+    setErrorMsg('');
+    setIsGoogleLoading(true);
+    try {
+      const { user, idToken } = await signInSuperAdminWithGoogle();
+      const verifiedEmail = (user.email || '').trim().toLowerCase();
+
+      try {
+        const exchanged = await exchangeFirebaseToken(idToken);
+        if (exchanged.status === 'AUTHENTICATED' && onAdminLoginSuccess) {
+          onAdminLoginSuccess({
+            ...exchanged.executive,
+            email: verifiedEmail || exchanged.executive.email,
+          });
+          return;
+        }
+      } catch (exchangeErr) {
+        const exStatus =
+          exchangeErr instanceof ExecutiveApiError ? exchangeErr.status : 0;
+        if (exStatus === 403 || exStatus === 401 || exStatus === 400) {
+          await logOutFirebase().catch(() => {});
+          throw exchangeErr;
+        }
+        // Continue to client-verified Super Admin fallback when backend /api is unavailable (404/network)
+      }
+
+      const resolvedExec = await resolveExecutiveFromFirebaseClient(
+        user.uid,
+        verifiedEmail
+      );
+      if (
+        resolvedExec &&
+        (resolvedExec.level === 'super_admin' || resolvedExec.role === 'Super Admin') &&
+        onAdminLoginSuccess
+      ) {
+        setStoredExecutiveToken(`firebase-session:${user.uid}`);
+        onAdminLoginSuccess(resolvedExec);
+        return;
+      }
+
+      await logOutFirebase().catch(() => {});
+      setErrorMsg(
+        'Access Denied: Google authentication is restricted exclusively to the AMMON Super Admin account.'
+      );
+    } catch (err: unknown) {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setErrorMsg('Google sign-in popup was closed before completing authentication.');
+      } else if (code === 'auth/popup-blocked') {
+        setErrorMsg('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.');
+      } else if (code === 'auth/unauthorized-domain') {
+        setErrorMsg(
+          'This domain is not yet allowlisted in Firebase Authentication Authorized Domains.'
+        );
+      } else {
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : 'Unable to authenticate Super Admin via Google.'
+        );
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
   };
 
   const handleCompletePasswordSetup = async (e: React.FormEvent) => {
@@ -992,7 +1064,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
 
                     <button
                       type="submit"
-                      disabled={isLoading}
+                      disabled={isLoading || isGoogleLoading}
                       className="w-full py-3 bg-[#176B37] hover:bg-[#14532D] text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
                     >
                       {isLoading ? (
@@ -1006,9 +1078,55 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                     </button>
                   </form>
 
+                  {/* Super Admin Only Google Authentication */}
+                  <div className="relative flex items-center py-1">
+                    <div className="grow border-t border-[#E5E7EB]" />
+                    <span className="shrink mx-3 text-[10px] font-extrabold uppercase tracking-wider text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                      <Crown className="w-3 h-3 text-amber-600" />
+                      <span>Super Admin Only</span>
+                    </span>
+                    <div className="grow border-t border-[#E5E7EB]" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleGoogleSuperAdminLogin}
+                    disabled={isLoading || isGoogleLoading}
+                    className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 border border-[#E5E7EB] hover:border-[#176B37]/40 rounded-xl font-bold text-xs text-[#252525] flex items-center justify-center gap-2.5 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isGoogleLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-[#176B37]" />
+                        <span>Verifying Super Admin Google Account...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                          <path
+                            fill="#4285F4"
+                            d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                          />
+                          <path
+                            fill="#34A853"
+                            d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                          />
+                          <path
+                            fill="#FBBC05"
+                            d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                          />
+                          <path
+                            fill="#EA4335"
+                            d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                          />
+                        </svg>
+                        <span>Continue with Google (Super Admin Only)</span>
+                      </>
+                    )}
+                  </button>
+
                   <div className="p-3 bg-gray-50 rounded-xl border border-[#E5E7EB] text-[11px] text-gray-600 flex items-center gap-2">
                     <Lock className="w-4 h-4 text-[#176B37] shrink-0" />
-                    <span>All executive accounts authenticate through one unified RBAC/LBAC backend system and route automatically to your assigned jurisdiction.</span>
+                    <span>Google SSO is locked exclusively to the Super Admin account. Other executives &amp; operators sign in with email/badge and password.</span>
                   </div>
                 </>
               )}

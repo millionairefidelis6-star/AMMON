@@ -5,6 +5,8 @@ import {
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -178,6 +180,26 @@ export async function signInWithFirebasePassword(
   password: string
 ): Promise<{ user: FirebaseUser; idToken: string }> {
   const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+  const idToken = await cred.user.getIdToken(true);
+  return { user: cred.user, idToken };
+}
+
+export async function signInSuperAdminWithGoogle(): Promise<{
+  user: FirebaseUser;
+  idToken: string;
+}> {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const cred = await signInWithPopup(auth, provider);
+  const email = (cred.user.email || '').trim().toLowerCase();
+  if (!BOOTSTRAPPED_SUPER_ADMIN_EMAILS.includes(email)) {
+    await signOut(auth);
+    throw new Error(
+      `Access Denied: Google authentication is restricted exclusively to the Super Admin account. "${
+        cred.user.email || 'Selected Google account'
+      }" is not authorized.`
+    );
+  }
   const idToken = await cred.user.getIdToken(true);
   return { user: cred.user, idToken };
 }

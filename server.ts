@@ -428,41 +428,62 @@ async function createAppServer() {
       let exec = ammonStore.findExecutiveByLogin(email);
 
       // Map bootstrapped root Super Admin email to super admin executive profile
-      if (!exec && email === 'millionairefidelis@gmail.com') {
+      if (!exec && (email === 'millionairefidelis@gmail.com' || email === 'superadmin@ammon.ng')) {
         exec = ammonStore.findExecutiveById('exec-super');
       }
 
-      if (!exec) {
+      const isSuperAdminAccount = Boolean(
+        exec && (exec.level === 'super_admin' || exec.role === 'Super Admin')
+      );
+
+      if (!exec || !isSuperAdminAccount) {
+        ammonStore.appendAuditLog({
+          actorId: exec?.id || fbUser.localId || 'unknown',
+          actorName: exec?.fullName || fbUser.displayName || email,
+          actorRole: exec?.role || 'Unauthorized User',
+          actorLevel: exec?.level || 'system',
+          actorJurisdiction: exec?.jurisdiction || 'Unauthenticated',
+          action: 'ACCESS_DENIED',
+          affectedRecordId: email,
+          affectedRecordLabel: email,
+          details: `Blocked Google authentication attempt for non-Super-Admin account "${email}".`,
+        });
         res.status(403).json({
-          error: 'No AMMON Executive appointment linked to this Google email.',
-          code: 'NOT_AN_EXECUTIVE',
+          error:
+            'Google authentication is restricted exclusively to the AMMON Super Admin. Executives and operators must sign in with email/badge and password.',
+          code: 'SUPER_ADMIN_ONLY',
         });
         return;
       }
 
       if (exec.activationStatus === 'Suspended') {
-        res.status(403).json({ error: 'This executive account has been suspended.' });
+        res.status(403).json({ error: 'This Super Admin account has been suspended.' });
         return;
       }
 
       exec.uid = fbUser.localId;
-      if (fbUser.photoUrl) exec.avatarUrl = fbUser.photoUrl;
+      if (fbUser.photoUrl && !exec.avatarUrl) exec.avatarUrl = fbUser.photoUrl;
       exec.requiresPasswordSetup = false;
       exec.activationStatus = 'Active';
       exec.lastLoginAt = nowWatLabel();
       ammonStore.save();
+
+      const safeExec = sanitizeExecutive(exec);
+      if (email === 'millionairefidelis@gmail.com') {
+        safeExec.email = 'millionairefidelis@gmail.com';
+      }
 
       const token = signExecutiveToken(exec);
       ammonStore.appendAuditLog({
         actorId: exec.id,
         actorName: exec.fullName,
         actorRole: exec.role,
-        actorLevel: exec.level || 'national',
+        actorLevel: exec.level || 'super_admin',
         actorJurisdiction: exec.jurisdiction,
         action: 'LOGIN',
         affectedRecordId: exec.id,
         affectedRecordLabel: `${exec.fullName} (Google SSO)`,
-        details: `Verified Firebase Google SSO login (${email}) routed to ${exec.level?.toUpperCase()} dashboard.`,
+        details: `Verified Super Admin Firebase Google SSO login (${email}).`,
         zone: exec.assignedZone,
         state: exec.assignedState,
         lga: exec.assignedLga,
@@ -471,7 +492,7 @@ async function createAppServer() {
       res.json({
         status: 'AUTHENTICATED',
         token,
-        executive: sanitizeExecutive(exec),
+        executive: safeExec,
       });
     } catch (err) {
       console.error('Firebase token exchange error:', err);

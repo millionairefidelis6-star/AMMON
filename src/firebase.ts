@@ -4,6 +4,7 @@ import {
   signOut, 
   onAuthStateChanged,
   sendPasswordResetEmail,
+  signInWithEmailAndPassword,
   User as FirebaseUser
 } from 'firebase/auth';
 import { 
@@ -165,4 +166,18 @@ export async function logOutFirebase(): Promise<void> {
 
 export async function sendPasswordReset(email: string): Promise<void> {
   await sendPasswordResetEmail(auth, email);
+}
+
+export const BOOTSTRAPPED_SUPER_ADMIN_EMAILS = [
+  'millionairefidelis@gmail.com',
+  'superadmin@ammon.ng',
+];
+
+export async function signInWithFirebasePassword(
+  email: string,
+  password: string
+): Promise<{ user: FirebaseUser; idToken: string }> {
+  const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+  const idToken = await cred.user.getIdToken(true);
+  return { user: cred.user, idToken };
 }

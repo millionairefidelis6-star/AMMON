@@ -96,6 +96,42 @@ function verifySecretString(plain: string, storedHash?: string, storedSalt?: str
   return false;
 }
 
+async function verifyFirebaseEmailPassword(
+  email: string,
+  password: string
+): Promise<{ localId: string; email: string; idToken: string } | null> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !password || !cleanEmail.includes('@')) return null;
+  try {
+    const resp = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          password,
+          returnSecureToken: true,
+        }),
+      }
+    );
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      localId?: string;
+      email?: string;
+      idToken?: string;
+    };
+    if (!data.localId || !data.idToken) return null;
+    return {
+      localId: data.localId,
+      email: (data.email || cleanEmail).toLowerCase(),
+      idToken: data.idToken,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function verifyExecutiveToken(token: string): SessionPayload | null {
   try {
     const parts = token.split('.');
@@ -186,25 +222,53 @@ async function createAppServer() {
   // =========================================================================
   // 1. UNIFIED EXECUTIVE AUTHENTICATION ROUTES
   // =========================================================================
-  app.post('/api/auth/executive-login', (req, res) => {
+  app.post('/api/auth/executive-login', async (req, res) => {
     const { identifier, password } = req.body || {};
     if (!identifier || !password) {
       res.status(400).json({ error: 'Institutional email/badge and password are required.' });
       return;
     }
 
-    const exec = ammonStore.findExecutiveByLogin(String(identifier));
-    if (!exec || !verifyPassword(String(password), exec.passwordHash, exec.passwordSalt)) {
+    const cleanId = String(identifier).trim();
+    const cleanLower = cleanId.toLowerCase();
+    let exec = ammonStore.findExecutiveByLogin(cleanId);
+    let valid = Boolean(exec && verifyPassword(String(password), exec.passwordHash, exec.passwordSalt));
+
+    if (!valid) {
+      const candidateEmail = cleanLower.includes('@')
+        ? cleanLower
+        : exec?.email?.toLowerCase();
+      if (candidateEmail) {
+        const fbAuth = await verifyFirebaseEmailPassword(candidateEmail, String(password));
+        if (fbAuth) {
+          if (!exec && fbAuth.email === 'millionairefidelis@gmail.com') {
+            exec = ammonStore.findExecutiveById('exec-super');
+          }
+          if (exec) {
+            const { hash, salt } = hashPassword(String(password));
+            exec.passwordHash = hash;
+            exec.passwordSalt = salt;
+            exec.uid = fbAuth.localId;
+            exec.requiresPasswordSetup = false;
+            exec.activationStatus = 'Active';
+            ammonStore.save();
+            valid = true;
+          }
+        }
+      }
+    }
+
+    if (!exec || !valid) {
       ammonStore.appendAuditLog({
         actorId: exec?.id || 'unknown',
-        actorName: exec?.fullName || String(identifier),
+        actorName: exec?.fullName || cleanId,
         actorRole: exec?.role || 'Unknown',
         actorLevel: exec?.level || 'system',
         actorJurisdiction: exec?.jurisdiction || 'Unauthenticated',
         action: 'LOGIN_FAILED',
-        affectedRecordId: String(identifier),
-        affectedRecordLabel: String(identifier),
-        details: `Failed executive login attempt for "${String(identifier)}".`,
+        affectedRecordId: cleanId,
+        affectedRecordLabel: cleanId,
+        details: `Failed executive login attempt for "${cleanId}".`,
       });
       res.status(401).json({ error: 'Invalid executive email/badge or password.' });
       return;
@@ -241,6 +305,11 @@ async function createAppServer() {
     exec.lastLoginAt = nowWatLabel();
     ammonStore.save();
 
+    const safeExec = sanitizeExecutive(exec);
+    if (cleanLower === 'millionairefidelis@gmail.com') {
+      safeExec.email = 'millionairefidelis@gmail.com';
+    }
+
     const token = signExecutiveToken(exec);
     ammonStore.appendAuditLog({
       actorId: exec.id,
@@ -260,7 +329,7 @@ async function createAppServer() {
     res.json({
       status: 'AUTHENTICATED',
       token,
-      executive: sanitizeExecutive(exec),
+      executive: safeExec,
     });
   });
 
@@ -413,7 +482,7 @@ async function createAppServer() {
   // =========================================================================
   // 1B. MEMBER PASSWORD AUTHENTICATION & EMAIL OTP VERIFICATION
   // =========================================================================
-  app.post('/api/auth/member-login', (req, res) => {
+  app.post('/api/auth/member-login', async (req, res) => {
     const { identifier, password } = req.body || {};
     const cleanId = String(identifier || '').trim().toLowerCase();
     const cleanPwd = String(password || '');
@@ -438,7 +507,19 @@ async function createAppServer() {
       return;
     }
 
-    const passwordValid = verifySecretString(cleanPwd, member.passwordHash, member.passwordSalt);
+    let passwordValid = verifySecretString(cleanPwd, member.passwordHash, member.passwordSalt);
+    if (!passwordValid && member.email) {
+      const fbAuth = await verifyFirebaseEmailPassword(member.email, cleanPwd);
+      if (fbAuth) {
+        const { hash, salt } = hashPassword(cleanPwd);
+        member.passwordHash = `scrypt:${salt}:${hash}`;
+        member.passwordSalt = salt;
+        member.emailVerified = true;
+        ammonStore.save();
+        passwordValid = true;
+      }
+    }
+
     if (!passwordValid) {
       res.status(401).json({
         error: 'Incorrect password. Please enter the exact password created during registration.',

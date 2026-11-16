@@ -16,13 +16,31 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import { Member, AdminUser } from '../types';
-import { sendPasswordReset } from '../firebase';
 import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from 'firebase/firestore';
+import { Member, AdminUser } from '../types';
+import {
+  BOOTSTRAPPED_SUPER_ADMIN_EMAILS,
+  db,
+  sendPasswordReset,
+  signInWithFirebasePassword,
+} from '../firebase';
+import { INITIAL_EXECUTIVE_ACCOUNTS } from '../data/hierarchyData';
+import {
+  ExecutiveApiError,
+  exchangeFirebaseToken,
   loginExecutive,
   loginMemberApi,
+  setStoredExecutiveToken,
   setupExecutivePassword,
 } from '../services/executiveApi';
+import { updateMemberInFirestore } from '../services/firestoreService';
 import { verifyMemberPasswordClient } from '../utils/passwordAuth';
 
 interface MemberLoginModalProps {
@@ -56,6 +74,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
   // Admin credentials
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
 
   // Mandatory First-Login Password Setup State (for Super Admin invited executives)
   const [passwordSetupChallenge, setPasswordSetupChallenge] = useState<{
@@ -88,7 +107,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
       if (adminEmail && adminEmail.includes('@')) {
         setResetEmail(adminEmail.trim());
       } else {
-        setResetEmail('superadmin@ammon.ng');
+        setResetEmail('');
       }
     } else {
       const clean = identifier.trim().toLowerCase();
@@ -184,6 +203,43 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
         apiErr && typeof apiErr === 'object' && 'status' in apiErr
           ? Number((apiErr as { status: unknown }).status)
           : 0;
+
+      // If password was reset via Firebase Auth or backend /api is unavailable (404), verify with Firebase Auth
+      const cleanDigits = cleanId.replace(/\s+/g, '');
+      const matched = members.find(
+        (m) =>
+          m.membershipId.toLowerCase() === cleanId ||
+          m.email.toLowerCase() === cleanId ||
+          (cleanDigits.length >= 7 && m.phone.replace(/\s+/g, '').includes(cleanDigits))
+      );
+
+      const candidateEmail = cleanId.includes('@') ? cleanId : matched?.email?.toLowerCase();
+      if (candidateEmail && (errStatus === 401 || errStatus === 404 || errStatus === 0 || errStatus >= 500)) {
+        try {
+          await signInWithFirebasePassword(candidateEmail, pin);
+          if (matched) {
+            const verifiedMember: Member = { ...matched, emailVerified: true };
+            if (!matched.emailVerified) {
+              updateMemberInFirestore(matched.id, { emailVerified: true }).catch(() => {});
+            }
+            onLoginSuccess(verifiedMember);
+            return;
+          }
+          // Check Firestore members if not yet hydrated locally
+          const snap = await getDocs(
+            query(collection(db, 'members'), where('email', '==', candidateEmail))
+          ).catch(() => null);
+          const firstDoc = snap?.docs?.[0]?.data() as Member | undefined;
+          if (firstDoc) {
+            const verifiedMember: Member = { ...firstDoc, emailVerified: true };
+            onLoginSuccess(verifiedMember);
+            return;
+          }
+        } catch {
+          // Continue to local hash check / error reporting
+        }
+      }
+
       if (errStatus === 400 || errStatus === 401 || errStatus === 403) {
         setErrorMsg(
           apiErr instanceof Error
@@ -193,15 +249,6 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
         setIsLoading(false);
         return;
       }
-
-      // Fallback strict verification for static preview / offline Cloud Firestore members
-      const cleanDigits = cleanId.replace(/\s+/g, '');
-      const matched = members.find(
-        (m) =>
-          m.membershipId.toLowerCase() === cleanId ||
-          m.email.toLowerCase() === cleanId ||
-          (cleanDigits.length >= 7 && m.phone.replace(/\s+/g, '').includes(cleanDigits))
-      );
 
       if (!matched) {
         setErrorMsg(
@@ -240,12 +287,93 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
     }
   };
 
+  const resolveExecutiveFromFirebaseClient = async (
+    uid: string,
+    email: string
+  ): Promise<AdminUser | null> => {
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 1. Check Firestore executives document by UID
+    try {
+      const uidDoc = await getDoc(doc(db, 'executives', uid));
+      if (uidDoc.exists()) {
+        const execData = uidDoc.data() as AdminUser;
+        if (execData.activationStatus !== 'Suspended') {
+          return { ...execData, uid };
+        }
+      }
+    } catch {
+      // Fall back to bootstrapped/seeded Super Admin & Executive definitions
+    }
+
+    // 2. Bootstrapped Super Admin access (millionairefidelis@gmail.com or superadmin@ammon.ng)
+    if (BOOTSTRAPPED_SUPER_ADMIN_EMAILS.includes(cleanEmail)) {
+      const superSeed = INITIAL_EXECUTIVE_ACCOUNTS.find((a) => a.id === 'exec-super');
+      if (superSeed) {
+        const { defaultPassword: _dp, ...safeSuper } = superSeed;
+        return {
+          ...safeSuper,
+          uid,
+          email: cleanEmail,
+          role: 'Super Admin',
+          level: 'super_admin',
+          activationStatus: 'Active',
+          requiresPasswordSetup: false,
+        };
+      }
+    }
+
+    // 3. Seeded hierarchy executive match by email
+    const seedMatch = INITIAL_EXECUTIVE_ACCOUNTS.find(
+      (a) => a.email.toLowerCase() === cleanEmail
+    );
+    if (seedMatch) {
+      const { defaultPassword: _dp, ...safeSeed } = seedMatch;
+      return {
+        ...safeSeed,
+        uid,
+        activationStatus: 'Active',
+        requiresPasswordSetup: false,
+      };
+    }
+
+    // 4. Query Firestore executives collection by email
+    try {
+      const qSnap = await getDocs(
+        query(collection(db, 'executives'), where('email', '==', cleanEmail))
+      );
+      if (!qSnap.empty) {
+        const docData = qSnap.docs[0].data() as AdminUser;
+        if (docData.activationStatus !== 'Suspended') {
+          return { ...docData, uid };
+        }
+      }
+    } catch {
+      // Not authorized or absent in Firestore
+    }
+
+    return null;
+  };
+
   // Handle unified executive authentication across all hierarchical levels
   const authenticateExecutive = async (emailOrBadge: string, pass: string) => {
     setErrorMsg('');
     setIsLoading(true);
+    const cleanInput = emailOrBadge.trim();
+    const cleanLower = cleanInput.toLowerCase();
+
+    const matchedSeed = INITIAL_EXECUTIVE_ACCOUNTS.find(
+      (a) =>
+        a.email.toLowerCase() === cleanLower ||
+        a.badgeNumber.toLowerCase() === cleanLower ||
+        (cleanLower === 'millionairefidelis@gmail.com' && a.id === 'exec-super')
+    );
+    const candidateEmail = cleanLower.includes('@')
+      ? cleanLower
+      : matchedSeed?.email.toLowerCase();
+
     try {
-      const res = await loginExecutive(emailOrBadge.trim(), pass);
+      const res = await loginExecutive(cleanInput, pass);
       if (res.status === 'PASSWORD_SETUP_REQUIRED') {
         setPasswordSetupChallenge({
           email: res.email,
@@ -257,14 +385,99 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
         return;
       }
       if (res.status === 'AUTHENTICATED' && onAdminLoginSuccess) {
+        if (candidateEmail) {
+          signInWithFirebasePassword(candidateEmail, pass).catch(() => {});
+        }
         onAdminLoginSuccess(res.executive);
+        return;
       }
     } catch (err) {
-      setErrorMsg(
-        err instanceof Error
-          ? err.message
-          : 'Invalid Executive credentials. Please use the demo personas below or your assigned email/password.'
-      );
+      const errStatus =
+        err instanceof ExecutiveApiError
+          ? err.status
+          : err && typeof err === 'object' && 'status' in err
+          ? Number((err as { status: unknown }).status)
+          : 0;
+
+      // Fallback to Firebase Authentication when password was reset via Forgot Password or /api returns 404
+      if (candidateEmail && (errStatus === 404 || errStatus === 401 || errStatus === 0 || errStatus >= 500)) {
+        try {
+          const { user, idToken } = await signInWithFirebasePassword(candidateEmail, pass);
+          try {
+            const exchanged = await exchangeFirebaseToken(idToken);
+            if (exchanged.status === 'AUTHENTICATED' && onAdminLoginSuccess) {
+              onAdminLoginSuccess({
+                ...exchanged.executive,
+                email: candidateEmail,
+              });
+              return;
+            }
+          } catch (exchangeErr) {
+            const exStatus =
+              exchangeErr instanceof ExecutiveApiError ? exchangeErr.status : 0;
+            if (exStatus !== 404 && exStatus !== 0 && exStatus < 500) {
+              throw exchangeErr;
+            }
+          }
+
+          // Static / serverless deployment fallback after verified Firebase Auth login
+          const resolvedExec = await resolveExecutiveFromFirebaseClient(
+            user.uid,
+            user.email || candidateEmail
+          );
+          if (resolvedExec && onAdminLoginSuccess) {
+            setStoredExecutiveToken(`firebase-session:${user.uid}`);
+            onAdminLoginSuccess(resolvedExec);
+            return;
+          }
+
+          setErrorMsg(
+            'Your Firebase password was verified, but no AMMON Executive or Super Admin role is linked to this email.'
+          );
+          return;
+        } catch (fbErr: unknown) {
+          const fbCode =
+            fbErr && typeof fbErr === 'object' && 'code' in fbErr
+              ? String((fbErr as { code: unknown }).code)
+              : '';
+          if (
+            errStatus !== 404 &&
+            (fbCode === 'auth/wrong-password' ||
+              fbCode === 'auth/invalid-credential' ||
+              fbCode === 'auth/user-not-found')
+          ) {
+            setErrorMsg('Invalid executive email/badge or password. Please verify and try again.');
+            return;
+          }
+          if (fbErr instanceof ExecutiveApiError) {
+            setErrorMsg(fbErr.message);
+            return;
+          }
+        }
+      }
+
+      // If running in static preview where /api/* returns 404, verify seeded executive credentials cleanly
+      if (errStatus === 404 && matchedSeed && matchedSeed.defaultPassword === pass && onAdminLoginSuccess) {
+        const { defaultPassword: _dp, ...safeExec } = matchedSeed;
+        setStoredExecutiveToken(`static-preview:${matchedSeed.id}`);
+        onAdminLoginSuccess({
+          ...safeExec,
+          ...(cleanLower === 'millionairefidelis@gmail.com' ? { email: 'millionairefidelis@gmail.com' } : {}),
+        });
+        return;
+      }
+
+      if (errStatus === 404) {
+        setErrorMsg(
+          'Invalid executive email/badge or password. If you reset your password via email, verify you are using your new password.'
+        );
+      } else {
+        setErrorMsg(
+          err instanceof Error
+            ? err.message
+            : 'Invalid Executive credentials. Please check your institutional email/badge and password.'
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -496,7 +709,7 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                         required
                         value={resetEmail}
                         onChange={(e) => setResetEmail(e.target.value)}
-                        placeholder="e.g. operator@kolawole.ng or superadmin@ammon.ng"
+                        placeholder="e.g. millionairefidelis@gmail.com or superadmin@ammon.ng"
                         className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
                       />
                     </div>
@@ -759,13 +972,21 @@ export const MemberLoginModal: React.FC<MemberLoginModalProps> = ({
                       <div className="relative">
                         <Lock className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
-                          type="password"
+                          type={showAdminPassword ? 'text' : 'password'}
                           required
                           value={adminPassword}
                           onChange={(e) => setAdminPassword(e.target.value)}
                           placeholder="••••••••"
-                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
+                          className="w-full pl-9 pr-9 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] text-xs"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setShowAdminPassword((v) => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
+                          aria-label={showAdminPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showAdminPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
 

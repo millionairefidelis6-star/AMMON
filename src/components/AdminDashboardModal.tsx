@@ -150,13 +150,64 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   } | null>(null);
   const [uploadError, setUploadError] = useState('');
 
+  const buildFallbackWorkspace = useCallback((): ExecutiveWorkspacePayload => {
+    const execLevel =
+      adminUser.level || (adminUser.role === 'Super Admin' ? 'super_admin' : 'national');
+    const filteredMembers =
+      execLevel === 'super_admin' || execLevel === 'national' || execLevel === 'specialized'
+        ? members
+        : members.filter((m) => {
+            if (execLevel === 'zonal') return m.zone === adminUser.assignedZone;
+            if (execLevel === 'state') return m.state === adminUser.assignedState;
+            if (execLevel === 'lga') {
+              return m.state === adminUser.assignedState && m.lga === adminUser.assignedLga;
+            }
+            return true;
+          });
+    const totalCollectedDues = filteredMembers.reduce((sum, m) => sum + (m.amountPaid || 0), 0);
+    const paystackVerifiedDues = filteredMembers
+      .filter((m) => m.paystackVerified)
+      .reduce((sum, m) => sum + (m.amountPaid || 0), 0);
+    const outstandingDues = filteredMembers.reduce(
+      (sum, m) => sum + Math.max(0, (m.duesAmount || 0) - (m.amountPaid || 0)),
+      0
+    );
+
+    return {
+      executive: adminUser,
+      hierarchyConfig: INITIAL_HIERARCHY_CONFIG,
+      members: filteredMembers,
+      reports: [],
+      announcements: [],
+      disputes,
+      financialAdjustments: [],
+      executives: INITIAL_EXECUTIVE_ACCOUNTS.map(({ defaultPassword: _dp, ...rest }) => rest),
+      auditLogs: [],
+      metrics: {
+        totalMembers: filteredMembers.length,
+        activeMembers: filteredMembers.filter((m) => m.status === 'Active').length,
+        pendingMembers: filteredMembers.filter((m) => m.status === 'Pending Verification').length,
+        expiredMembers: filteredMembers.filter((m) => m.status === 'Expired').length,
+        totalCollectedDues,
+        paystackVerifiedDues,
+        outstandingDues,
+      },
+    };
+  }, [adminUser, members, disputes]);
+
   const loadWorkspace = useCallback(
     async (filtersOverride?: { zone?: string; state?: string; lga?: string }) => {
       setWorkspaceLoading(true);
       setWorkspaceError('');
       try {
-        if (!getStoredExecutiveToken()) {
+        const token = getStoredExecutiveToken();
+        if (!token) {
           setWorkspaceError('Executive session token required. Please sign in again via Executive Login.');
+          setWorkspaceLoading(false);
+          return;
+        }
+        if (token.startsWith('firebase-session:') || token.startsWith('static-preview:')) {
+          setWorkspace(buildFallbackWorkspace());
           setWorkspaceLoading(false);
           return;
         }
@@ -164,14 +215,22 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         const data = await fetchExecutiveWorkspace(activeFilters);
         setWorkspace(data);
       } catch (err) {
-        setWorkspaceError(
-          err instanceof Error ? err.message : 'Unable to fetch executive workspace from backend.'
-        );
+        const errStatus =
+          err && typeof err === 'object' && 'status' in err
+            ? Number((err as { status: unknown }).status)
+            : 0;
+        if (errStatus === 404) {
+          setWorkspace(buildFallbackWorkspace());
+        } else {
+          setWorkspaceError(
+            err instanceof Error ? err.message : 'Unable to fetch executive workspace from backend.'
+          );
+        }
       } finally {
         setWorkspaceLoading(false);
       }
     },
-    [geoFilters]
+    [geoFilters, buildFallbackWorkspace]
   );
 
   useEffect(() => {

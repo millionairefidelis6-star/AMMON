@@ -40,6 +40,7 @@ import {
   permanentDeleteSocialMessageApi,
 } from './services/executiveApi';
 import { deleteChatMediaAsset } from './services/storageService';
+import { logOutFirebase } from './firebase';
 import {
   LEGACY_TEST_MEMBER_IDS,
   subscribeToMembers,
@@ -345,6 +346,7 @@ export default function App() {
   const handleAdminLogout = () => {
     setAdminUser(null);
     setStoredExecutiveToken(null);
+    logOutFirebase().catch(() => {});
     try {
       localStorage.removeItem('ammon_logged_in_admin');
     } catch {}

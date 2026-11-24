@@ -28,7 +28,8 @@ import {
 import { NIGERIAN_STATES } from "../data/mockData";
 import {
   INITIAL_EXECUTIVE_ACCOUNTS,
-  INITIAL_HIERARCHY_CONFIG
+  INITIAL_HIERARCHY_CONFIG,
+  resolveZoneForState
 } from "../data/hierarchyData";
 import { AmmonLogo } from "./AmmonLogo";
 import {
@@ -91,16 +92,41 @@ const AdminDashboardModal = ({
   const [circularSuccess, setCircularSuccess] = useState("");
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [uploadError, setUploadError] = useState("");
-  const buildFallbackWorkspace = useCallback(() => {
-    const execLevel2 = adminUser.level || (adminUser.role === "Super Admin" ? "super_admin" : "national");
-    const filteredMembers = execLevel2 === "super_admin" || execLevel2 === "national" || execLevel2 === "specialized" ? members : members.filter((m) => {
-      if (execLevel2 === "zonal") return m.zone === adminUser.assignedZone;
-      if (execLevel2 === "state") return m.state === adminUser.assignedState;
-      if (execLevel2 === "lga") {
-        return m.state === adminUser.assignedState && m.lga === adminUser.assignedLga;
-      }
+  const isMemberInJurisdiction = useCallback((exec, m) => {
+    const level = exec.level || (exec.role === "Super Admin" ? "super_admin" : "national");
+    if (level === "super_admin" || level === "national") return true;
+    const mZone = m.zone || resolveZoneForState(m.state);
+    if (level === "specialized") {
+      if (exec.permissions?.crossZoneAuthorized) return true;
+      if (exec.assignedZone && mZone !== exec.assignedZone) return false;
+      if (exec.assignedState && m.state !== exec.assignedState) return false;
       return true;
-    });
+    }
+    if (level === "zonal") {
+      return exec.permissions?.crossZoneAuthorized ? true : Boolean(exec.assignedZone && mZone === exec.assignedZone);
+    }
+    if (level === "state") {
+      return Boolean(exec.assignedState && m.state === exec.assignedState);
+    }
+    if (level === "lga") {
+      return Boolean(
+        exec.assignedState && exec.assignedLga && m.state === exec.assignedState && (m.lga || "").toLowerCase() === exec.assignedLga.toLowerCase()
+      );
+    }
+    if (level === "ward") {
+      return Boolean(
+        exec.assignedState && exec.assignedLga && exec.assignedWard && m.state === exec.assignedState && (m.lga || "").toLowerCase() === exec.assignedLga.toLowerCase() && (m.ward || "").toLowerCase() === exec.assignedWard.toLowerCase()
+      );
+    }
+    if (level === "community") {
+      return Boolean(
+        exec.assignedState && exec.assignedLga && exec.assignedWard && exec.assignedCommunity && m.state === exec.assignedState && (m.lga || "").toLowerCase() === exec.assignedLga.toLowerCase() && (m.ward || "").toLowerCase() === exec.assignedWard.toLowerCase() && (m.community || "").toLowerCase() === exec.assignedCommunity.toLowerCase()
+      );
+    }
+    return false;
+  }, []);
+  const buildFallbackWorkspace = useCallback(() => {
+    const filteredMembers = members.filter((m) => isMemberInJurisdiction(adminUser, m));
     const totalCollectedDues = filteredMembers.reduce((sum, m) => sum + (m.amountPaid || 0), 0);
     const paystackVerifiedDues = filteredMembers.filter((m) => m.paystackVerified).reduce((sum, m) => sum + (m.amountPaid || 0), 0);
     const outstandingDues = filteredMembers.reduce(
@@ -127,7 +153,7 @@ const AdminDashboardModal = ({
         outstandingDues
       }
     };
-  }, [adminUser, members, disputes]);
+  }, [adminUser, members, disputes, isMemberInJurisdiction]);
   const loadWorkspace = useCallback(
     async (filtersOverride) => {
       setWorkspaceLoading(true);
@@ -224,7 +250,21 @@ const AdminDashboardModal = ({
   const execLevel = activeExec.level || (activeExec.role === "Super Admin" ? "super_admin" : "national");
   const isSuperAdmin = execLevel === "super_admin" || activeExec.role === "Super Admin";
   const isTopCouncil = isSuperAdmin || execLevel === "national";
-  const scopedMembers = workspace?.members || members;
+  const scopedMembers = (() => {
+    const byId = /* @__PURE__ */ new Map();
+    for (const m of members) {
+      if (!isMemberInJurisdiction(activeExec, m)) continue;
+      const mZone = m.zone || resolveZoneForState(m.state);
+      if (geoFilters.zone && geoFilters.zone !== "All" && mZone !== geoFilters.zone) continue;
+      if (geoFilters.state && geoFilters.state !== "All" && m.state !== geoFilters.state) continue;
+      if (geoFilters.lga && geoFilters.lga !== "All" && (m.lga || "").toLowerCase() !== geoFilters.lga.toLowerCase()) continue;
+      byId.set(m.id, m);
+    }
+    for (const wm of workspace?.members || []) {
+      byId.set(wm.id, wm);
+    }
+    return Array.from(byId.values());
+  })();
   const scopedReports = workspace?.reports || [];
   const scopedAnnouncements = workspace?.announcements || [];
   const scopedDisputes = workspace?.disputes || disputes;
@@ -232,7 +272,7 @@ const AdminDashboardModal = ({
   const scopedExecutives = workspace?.executives || [];
   const scopedAuditLogs = workspace?.auditLogs || [];
   const hierarchyConfig = workspace?.hierarchyConfig || INITIAL_HIERARCHY_CONFIG;
-  const computedMetrics = workspace?.metrics || {
+  const computedMetrics = {
     totalMembers: scopedMembers.length,
     activeMembers: scopedMembers.filter((m) => m.status === "Active").length,
     pendingMembers: scopedMembers.filter((m) => m.status === "Pending Verification").length,
@@ -259,9 +299,9 @@ const AdminDashboardModal = ({
     },
     {
       id: "registry",
-      label: "Centralized Registry & Dues",
+      label: "Membership Registry & Dues",
       icon: Users,
-      badge: `${scopedMembers.length} Records`
+      badge: `${scopedMembers.length} Operators`
     },
     {
       id: "reports",
@@ -740,7 +780,7 @@ const AdminDashboardModal = ({
     className={`flex-1 bg-[#F9FBFA]/60 min-w-0 ${activeSection === "social-space" || activeSection === "online-meetings" ? "flex flex-col overflow-hidden p-0 sm:p-4" : "overflow-y-auto p-4 sm:p-8"}`}
   >
             <div
-    className={`${activeSection === "social-space" || activeSection === "online-meetings" ? "max-w-6xl w-full flex-1 flex flex-col min-h-0" : "max-w-5xl space-y-6"} mx-auto min-w-0`}
+    className={`${activeSection === "social-space" || activeSection === "online-meetings" ? "max-w-6xl w-full flex-1 flex flex-col min-h-0" : activeSection === "registry" ? "max-w-7xl space-y-6" : "max-w-5xl space-y-6"} mx-auto min-w-0`}
   >
               {workspaceLoading && <div className="p-3 rounded-xl bg-[#EAF3ED] border border-[#176B37]/30 text-xs text-[#14532D] flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin text-[#176B37]" />

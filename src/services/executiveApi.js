@@ -224,15 +224,33 @@ async function permanentDeleteSocialMessageApi(messageId, payload) {
     }
   );
 }
+async function fetchExecutiveRegistryMembers(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value && value !== "All") {
+      params.set(key, String(value));
+    }
+  });
+  const qs = params.toString();
+  return apiRequest(`/api/executive/members${qs ? `?${qs}` : ""}`);
+}
+async function logExecutiveRegistryExport(payload) {
+  return apiRequest("/api/executive/members/export-audit", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
 export {
   ExecutiveApiError,
   createExecutiveAccountApi,
   createFinancialAdjustmentApi,
   exchangeFirebaseToken,
+  fetchExecutiveRegistryMembers,
   fetchExecutiveWorkspace,
   fetchPublicHierarchy,
   fetchPublicMembers,
   getStoredExecutiveToken,
+  logExecutiveRegistryExport,
   loginExecutive,
   loginMemberApi,
   permanentDeleteSocialMessageApi,

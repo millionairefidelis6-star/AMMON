@@ -715,6 +715,127 @@ async function createAppServer() {
       }
     });
   });
+  app.get("/api/executive/members", requireExecutiveAuth, (req, res) => {
+    const exec = req.executive;
+    const db = ammonStore.getData();
+    const reqZone = typeof req.query.zone === "string" && req.query.zone !== "All" ? req.query.zone.trim() : void 0;
+    const reqState = typeof req.query.state === "string" && req.query.state !== "All" ? req.query.state.trim() : void 0;
+    const reqLga = typeof req.query.lga === "string" && req.query.lga !== "All" ? req.query.lga.trim() : void 0;
+    const reqWard = typeof req.query.ward === "string" && req.query.ward !== "All" ? req.query.ward.trim() : void 0;
+    const reqCategory = typeof req.query.category === "string" && req.query.category !== "All" ? req.query.category.trim() : void 0;
+    const reqStatus = typeof req.query.status === "string" && req.query.status !== "All" ? req.query.status.trim() : void 0;
+    const reqPayStatus = typeof req.query.paymentStatus === "string" && req.query.paymentStatus !== "All" ? req.query.paymentStatus.trim() : void 0;
+    const reqSearch = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+    const reqJoinedFrom = typeof req.query.joinedFrom === "string" ? req.query.joinedFrom.trim() : "";
+    const reqJoinedTo = typeof req.query.joinedTo === "string" ? req.query.joinedTo.trim() : "";
+    if (reqZone && exec.level === "zonal" && !exec.permissions?.crossZoneAuthorized && reqZone !== exec.assignedZone) {
+      denyAndLogJurisdictionViolation(
+        exec,
+        res,
+        `Zone:${reqZone}`,
+        `${exec.fullName} (${exec.assignedZone} Zonal Exec) attempted unauthorized registry query for "${reqZone}" zone.`,
+        { zone: reqZone }
+      );
+      return;
+    }
+    if (reqState && (exec.level === "state" || exec.level === "lga" || exec.level === "ward" || exec.level === "community") && reqState !== exec.assignedState) {
+      denyAndLogJurisdictionViolation(
+        exec,
+        res,
+        `State:${reqState}`,
+        `${exec.fullName} (${exec.assignedState}) attempted unauthorized registry query for "${reqState} State".`,
+        { state: reqState }
+      );
+      return;
+    }
+    if (reqState && exec.level === "zonal" && !exec.permissions?.crossZoneAuthorized && ammonStore.resolveZoneForState(reqState) !== exec.assignedZone) {
+      denyAndLogJurisdictionViolation(
+        exec,
+        res,
+        `State:${reqState}`,
+        `${exec.fullName} (${exec.assignedZone} Zone) attempted unauthorized registry query for "${reqState} State" outside their zone.`,
+        { state: reqState, zone: ammonStore.resolveZoneForState(reqState) }
+      );
+      return;
+    }
+    if (reqLga && (exec.level === "lga" || exec.level === "ward" || exec.level === "community") && reqLga.toLowerCase() !== (exec.assignedLga || "").toLowerCase()) {
+      denyAndLogJurisdictionViolation(
+        exec,
+        res,
+        `LGA:${reqLga}`,
+        `${exec.fullName} (${exec.assignedLga} LGA) attempted unauthorized registry query for "${reqLga} LGA".`,
+        { state: exec.assignedState, lga: reqLga }
+      );
+      return;
+    }
+    const authorizedMembers = db.members.map(
+      (m) => sanitizeMember({
+        ...m,
+        zone: m.zone || ammonStore.resolveZoneForState(m.state),
+        paymentStatus: ammonStore.normalizePaymentStatus(m)
+      })
+    ).filter((m) => ammonStore.isGeoInJurisdiction(exec, m));
+    const filtered = authorizedMembers.filter((m) => {
+      if (reqZone && m.zone !== reqZone) return false;
+      if (reqState && m.state !== reqState) return false;
+      if (reqLga && (m.lga || "").toLowerCase() !== reqLga.toLowerCase()) return false;
+      if (reqWard && (m.ward || "").toLowerCase() !== reqWard.toLowerCase()) return false;
+      if (reqCategory && m.category !== reqCategory) return false;
+      if (reqStatus && m.status !== reqStatus) return false;
+      if (reqPayStatus && (m.paymentStatus || "Unpaid") !== reqPayStatus) return false;
+      if (reqJoinedFrom && m.joinedDate && m.joinedDate < reqJoinedFrom) return false;
+      if (reqJoinedTo && m.joinedDate && m.joinedDate > reqJoinedTo) return false;
+      if (reqSearch) {
+        const hay = [
+          m.fullName,
+          m.businessName,
+          m.membershipId,
+          m.email,
+          m.phone,
+          m.terminalSerialNumber,
+          m.terminalProvider,
+          m.state,
+          m.lga,
+          m.ward,
+          m.community
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!hay.includes(reqSearch)) return false;
+      }
+      return true;
+    });
+    res.json({
+      executive: sanitizeExecutive(exec),
+      totalAuthorized: authorizedMembers.length,
+      filteredCount: filtered.length,
+      members: filtered
+    });
+  });
+  app.post("/api/executive/members/export-audit", requireExecutiveAuth, (req, res) => {
+    const exec = req.executive;
+    const { format, recordCount, filtersSummary } = req.body || {};
+    const cleanFormat = String(format || "").toUpperCase();
+    if (!["CSV", "JSON", "PRINT"].includes(cleanFormat)) {
+      res.status(400).json({ error: "Export format must be CSV, JSON, or PRINT." });
+      return;
+    }
+    const count = Math.max(0, Math.min(1e6, Number(recordCount) || 0));
+    const cleanSummary = typeof filtersSummary === "string" && filtersSummary.trim() ? filtersSummary.trim().slice(0, 500) : "All authorized operators in scope";
+    const auditEntry = ammonStore.appendAuditLog({
+      actorId: exec.id,
+      actorName: exec.fullName,
+      actorRole: exec.role,
+      actorLevel: exec.level || "national",
+      actorJurisdiction: exec.jurisdiction,
+      action: "REGISTRY_EXPORT",
+      affectedRecordId: `export-${cleanFormat.toLowerCase()}-${Date.now()}`,
+      affectedRecordLabel: `${cleanFormat} Directory Export (${count} operators)`,
+      details: `Exported ${count} mobile money operator record(s) in ${cleanFormat} format. Filters: ${cleanSummary}.`,
+      zone: exec.assignedZone,
+      state: exec.assignedState,
+      lga: exec.assignedLga
+    });
+    res.status(201).json({ ok: true, auditEntry });
+  });
   app.post("/api/members", (req, res) => {
     const authHeader = req.headers.authorization || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";

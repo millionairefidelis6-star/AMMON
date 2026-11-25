@@ -250,7 +250,7 @@ function printDigitalCardDocument(member) {
 
   <div class="header">
     <h1>ASSOCIATION OF MOBILE MONEY OPERATORS OF NIGERIA (AMMON)</h1>
-    <p>National HQ: 46 Dala Hills Street, Brains &amp; Hammers Estate, Galadimawa, Abuja | CAC/IT/NO/129481 | Recognized by CBN</p>
+    <p>National HQ: 46 Dala Hills Street, Brains &amp; Hammers Estate, Galadimawa, Abuja | CAC Registration: RC 80540 | Recognised by: Central Bank of Nigeria (CBN) | www.ammon.com.ng</p>
   </div>
 
   <div class="card-wrap">

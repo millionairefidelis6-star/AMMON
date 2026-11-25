@@ -120,8 +120,32 @@ class AmmonStore {
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.executives) && Array.isArray(parsed.members)) {
           const initial = buildInitialStore();
-          return {
-            executives: parsed.executives.length > 0 ? parsed.executives : initial.executives,
+          let migrated = false;
+          const executives = (parsed.executives.length > 0 ? parsed.executives : initial.executives).map((exec) => {
+            if (exec.id === "exec-super") {
+              const updated = { ...exec };
+              if (!updated.fullName || updated.fullName === "Dr. Victor O. Babatunde") {
+                updated.fullName = "Millionaire Fidelis";
+                migrated = true;
+              }
+              if (!updated.title || updated.title.includes("National President")) {
+                updated.title = "National Secretary General & Super Administrator";
+                migrated = true;
+              }
+              if (!updated.position || updated.position.includes("National President")) {
+                updated.position = "National Secretary General & Super Administrator";
+                migrated = true;
+              }
+              if (updated.email === "superadmin@ammon.ng") {
+                updated.email = "millionairefidelis@gmail.com";
+                migrated = true;
+              }
+              return updated;
+            }
+            return exec;
+          });
+          const loaded = {
+            executives,
             members: parsed.members,
             reports: Array.isArray(parsed.reports) ? parsed.reports : initial.reports,
             announcements: Array.isArray(parsed.announcements) ? parsed.announcements : initial.announcements,
@@ -130,6 +154,10 @@ class AmmonStore {
             disputes: Array.isArray(parsed.disputes) ? parsed.disputes : initial.disputes,
             hierarchyConfig: parsed.hierarchyConfig || initial.hierarchyConfig
           };
+          if (migrated) {
+            this.persist(loaded);
+          }
+          return loaded;
         }
       }
     } catch (err) {

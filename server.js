@@ -85,14 +85,52 @@ async function verifyFirebaseEmailPassword(email, password) {
     if (!resp.ok) return null;
     const data = await resp.json();
     if (!data.localId || !data.idToken) return null;
+    let displayName = typeof data.displayName === "string" ? data.displayName.trim() : "";
+    let photoUrl = typeof data.profilePicture === "string" ? data.profilePicture.trim() : "";
+    if (!displayName) {
+      try {
+        const lookupResp = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ idToken: data.idToken })
+          }
+        );
+        if (lookupResp.ok) {
+          const lookupData = await lookupResp.json();
+          const fbUser = lookupData.users?.[0];
+          if (fbUser?.displayName) displayName = String(fbUser.displayName).trim();
+          if (fbUser?.photoUrl && !photoUrl) photoUrl = String(fbUser.photoUrl).trim();
+        }
+      } catch {
+      }
+    }
     return {
       localId: data.localId,
       email: (data.email || cleanEmail).toLowerCase(),
-      idToken: data.idToken
+      idToken: data.idToken,
+      displayName,
+      photoUrl
     };
   } catch {
     return null;
   }
+}
+function resolveSuperAdminSignupName(exec, fbDisplayName, email) {
+  const cleanFbName = typeof fbDisplayName === "string" ? fbDisplayName.trim() : "";
+  if (cleanFbName) return cleanFbName;
+  const cleanEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+  if (cleanEmail) {
+    const memberMatch = ammonStore.getData().members.find(
+      (m) => (m.email || "").trim().toLowerCase() === cleanEmail && m.fullName
+    );
+    if (memberMatch?.fullName) return String(memberMatch.fullName).trim();
+  }
+  if (exec?.fullName && exec.fullName !== "Dr. Victor O. Babatunde") {
+    return exec.fullName;
+  }
+  return "Millionaire Fidelis";
 }
 function verifyExecutiveToken(token) {
   try {
@@ -177,11 +215,15 @@ async function createAppServer() {
     const cleanLower = cleanId.toLowerCase();
     let exec = ammonStore.findExecutiveByLogin(cleanId);
     let valid = Boolean(exec && verifyPassword(String(password), exec.passwordHash, exec.passwordSalt));
+    let fbDisplayName = "";
+    let fbPhotoUrl = "";
     if (!valid) {
       const candidateEmail = cleanLower.includes("@") ? cleanLower : exec?.email?.toLowerCase();
       if (candidateEmail) {
         const fbAuth = await verifyFirebaseEmailPassword(candidateEmail, String(password));
         if (fbAuth) {
+          fbDisplayName = fbAuth.displayName || "";
+          fbPhotoUrl = fbAuth.photoUrl || "";
           if (!exec && fbAuth.email === "millionairefidelis@gmail.com") {
             exec = ammonStore.findExecutiveById("exec-super");
           }
@@ -239,12 +281,16 @@ async function createAppServer() {
       });
       return;
     }
+    if (exec.id === "exec-super" || cleanLower === "millionairefidelis@gmail.com") {
+      exec.email = "millionairefidelis@gmail.com";
+      exec.fullName = resolveSuperAdminSignupName(exec, fbDisplayName, exec.email);
+      exec.title = "National Secretary General & Super Administrator";
+      exec.position = "National Secretary General & Super Administrator";
+      if (fbPhotoUrl && !exec.avatarUrl) exec.avatarUrl = fbPhotoUrl;
+    }
     exec.lastLoginAt = nowWatLabel();
     ammonStore.save();
     const safeExec = sanitizeExecutive(exec);
-    if (cleanLower === "millionairefidelis@gmail.com") {
-      safeExec.email = "millionairefidelis@gmail.com";
-    }
     const token = signExecutiveToken(exec);
     ammonStore.appendAuditLog({
       actorId: exec.id,
@@ -341,27 +387,30 @@ async function createAppServer() {
         return;
       }
       const email = fbUser.email.toLowerCase();
-      let exec = ammonStore.findExecutiveByLogin(email);
-      if (!exec && (email === "millionairefidelis@gmail.com" || email === "superadmin@ammon.ng")) {
-        exec = ammonStore.findExecutiveById("exec-super");
-      }
-      const isSuperAdminAccount = Boolean(
-        exec && (exec.level === "super_admin" || exec.role === "Super Admin")
-      );
-      if (!exec || !isSuperAdminAccount) {
+      const SUPER_ADMIN_GOOGLE_EMAIL = "millionairefidelis@gmail.com";
+      if (email !== SUPER_ADMIN_GOOGLE_EMAIL) {
+        const existingExec = ammonStore.findExecutiveByLogin(email);
         ammonStore.appendAuditLog({
-          actorId: exec?.id || fbUser.localId || "unknown",
-          actorName: exec?.fullName || fbUser.displayName || email,
-          actorRole: exec?.role || "Unauthorized User",
-          actorLevel: exec?.level || "system",
-          actorJurisdiction: exec?.jurisdiction || "Unauthenticated",
+          actorId: existingExec?.id || fbUser.localId || "unknown",
+          actorName: existingExec?.fullName || fbUser.displayName || email,
+          actorRole: existingExec?.role || "Unauthorized User",
+          actorLevel: existingExec?.level || "system",
+          actorJurisdiction: existingExec?.jurisdiction || "Unauthenticated",
           action: "ACCESS_DENIED",
           affectedRecordId: email,
           affectedRecordLabel: email,
-          details: `Blocked Google authentication attempt for non-Super-Admin account "${email}".`
+          details: `Blocked Google authentication attempt for "${email}". Google SSO is restricted exclusively to Super Admin (${SUPER_ADMIN_GOOGLE_EMAIL}).`
         });
         res.status(403).json({
-          error: "Google authentication is restricted exclusively to the AMMON Super Admin. Executives and operators must sign in with email/badge and password.",
+          error: `Google authentication is restricted exclusively to the AMMON Super Admin (${SUPER_ADMIN_GOOGLE_EMAIL}). Other executives and operators must sign in with email/badge and password.`,
+          code: "SUPER_ADMIN_ONLY"
+        });
+        return;
+      }
+      const exec = ammonStore.findExecutiveByLogin(email) || ammonStore.findExecutiveById("exec-super");
+      if (!exec) {
+        res.status(403).json({
+          error: "Super Admin account record is unavailable.",
           code: "SUPER_ADMIN_ONLY"
         });
         return;
@@ -371,15 +420,16 @@ async function createAppServer() {
         return;
       }
       exec.uid = fbUser.localId;
+      exec.email = SUPER_ADMIN_GOOGLE_EMAIL;
+      exec.fullName = resolveSuperAdminSignupName(exec, fbUser.displayName, email);
+      exec.title = "National Secretary General & Super Administrator";
+      exec.position = "National Secretary General & Super Administrator";
       if (fbUser.photoUrl && !exec.avatarUrl) exec.avatarUrl = fbUser.photoUrl;
       exec.requiresPasswordSetup = false;
       exec.activationStatus = "Active";
       exec.lastLoginAt = nowWatLabel();
       ammonStore.save();
       const safeExec = sanitizeExecutive(exec);
-      if (email === "millionairefidelis@gmail.com") {
-        safeExec.email = "millionairefidelis@gmail.com";
-      }
       const token = signExecutiveToken(exec);
       ammonStore.appendAuditLog({
         actorId: exec.id,

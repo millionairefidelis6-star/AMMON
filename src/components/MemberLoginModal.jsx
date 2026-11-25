@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   X,
   Lock,
@@ -26,6 +26,7 @@ import {
 } from "firebase/firestore";
 import {
   BOOTSTRAPPED_SUPER_ADMIN_EMAILS,
+  SUPER_ADMIN_GOOGLE_EMAIL,
   db,
   logOutFirebase,
   sendPasswordReset,
@@ -72,6 +73,14 @@ const MemberLoginModal = ({
   const [isResetting, setIsResetting] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const [resetError, setResetError] = useState("");
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(defaultTab);
+      setIsForgotPassword(false);
+      setErrorMsg("");
+      setResetError("");
+    }
+  }, [isOpen, defaultTab]);
   const handleOpenForgotPassword = () => {
     setErrorMsg("");
     setResetError("");
@@ -231,14 +240,31 @@ const MemberLoginModal = ({
       setIsLoading(false);
     }
   };
-  const resolveExecutiveFromFirebaseClient = async (uid, email) => {
+  const resolveExecutiveFromFirebaseClient = async (uid, email, displayName) => {
     const cleanEmail = email.trim().toLowerCase();
+    const cleanDisplayName = typeof displayName === "string" ? displayName.trim() : "";
+    const memberNameMatch = members.find(
+      (m) => (m.email || "").trim().toLowerCase() === cleanEmail && m.fullName
+    )?.fullName?.trim();
+    const normalizeSuperProfile = (record) => {
+      if (record.id === "exec-super" || cleanEmail === SUPER_ADMIN_GOOGLE_EMAIL) {
+        const resolvedName = cleanDisplayName || memberNameMatch || (record.fullName && record.fullName !== "Dr. Victor O. Babatunde" ? record.fullName : "Millionaire Fidelis");
+        return {
+          ...record,
+          email: cleanEmail || record.email,
+          fullName: resolvedName,
+          title: "National Secretary General & Super Administrator",
+          position: "National Secretary General & Super Administrator"
+        };
+      }
+      return record;
+    };
     try {
       const uidDoc = await getDoc(doc(db, "executives", uid));
       if (uidDoc.exists()) {
         const execData = uidDoc.data();
         if (execData.activationStatus !== "Suspended") {
-          return { ...execData, uid };
+          return normalizeSuperProfile({ ...execData, uid });
         }
       }
     } catch {
@@ -247,7 +273,7 @@ const MemberLoginModal = ({
       const superSeed = INITIAL_EXECUTIVE_ACCOUNTS.find((a) => a.id === "exec-super");
       if (superSeed) {
         const { defaultPassword: _dp, ...safeSuper } = superSeed;
-        return {
+        return normalizeSuperProfile({
           ...safeSuper,
           uid,
           email: cleanEmail,
@@ -255,7 +281,7 @@ const MemberLoginModal = ({
           level: "super_admin",
           activationStatus: "Active",
           requiresPasswordSetup: false
-        };
+        });
       }
     }
     const seedMatch = INITIAL_EXECUTIVE_ACCOUNTS.find(
@@ -263,12 +289,12 @@ const MemberLoginModal = ({
     );
     if (seedMatch) {
       const { defaultPassword: _dp, ...safeSeed } = seedMatch;
-      return {
+      return normalizeSuperProfile({
         ...safeSeed,
         uid,
         activationStatus: "Active",
         requiresPasswordSetup: false
-      };
+      });
     }
     try {
       const qSnap = await getDocs(
@@ -277,7 +303,7 @@ const MemberLoginModal = ({
       if (!qSnap.empty) {
         const docData = qSnap.docs[0].data();
         if (docData.activationStatus !== "Suspended") {
-          return { ...docData, uid };
+          return normalizeSuperProfile({ ...docData, uid });
         }
       }
     } catch {
@@ -321,9 +347,15 @@ const MemberLoginModal = ({
           try {
             const exchanged = await exchangeFirebaseToken(idToken);
             if (exchanged.status === "AUTHENTICATED" && onAdminLoginSuccess) {
+              const fbName = user.displayName?.trim();
               onAdminLoginSuccess({
                 ...exchanged.executive,
-                email: candidateEmail
+                email: candidateEmail,
+                ...exchanged.executive?.id === "exec-super" ? {
+                  fullName: fbName || exchanged.executive.fullName,
+                  title: "National Secretary General & Super Administrator",
+                  position: "National Secretary General & Super Administrator"
+                } : {}
               });
               return;
             }
@@ -335,7 +367,8 @@ const MemberLoginModal = ({
           }
           const resolvedExec = await resolveExecutiveFromFirebaseClient(
             user.uid,
-            user.email || candidateEmail
+            user.email || candidateEmail,
+            user.displayName
           );
           if (resolvedExec && onAdminLoginSuccess) {
             setStoredExecutiveToken(`firebase-session:${user.uid}`);
@@ -390,12 +423,24 @@ const MemberLoginModal = ({
     try {
       const { user, idToken } = await signInSuperAdminWithGoogle();
       const verifiedEmail = (user.email || "").trim().toLowerCase();
+      if (verifiedEmail !== SUPER_ADMIN_GOOGLE_EMAIL) {
+        await logOutFirebase().catch(() => {
+        });
+        setErrorMsg(
+          `Access Denied: Google authentication is restricted exclusively to the Super Admin account (${SUPER_ADMIN_GOOGLE_EMAIL}).`
+        );
+        return;
+      }
       try {
         const exchanged = await exchangeFirebaseToken(idToken);
         if (exchanged.status === "AUTHENTICATED" && onAdminLoginSuccess) {
+          const fbName = user.displayName?.trim();
           onAdminLoginSuccess({
             ...exchanged.executive,
-            email: verifiedEmail || exchanged.executive.email
+            email: verifiedEmail || exchanged.executive.email,
+            fullName: fbName || exchanged.executive.fullName,
+            title: "National Secretary General & Super Administrator",
+            position: "National Secretary General & Super Administrator"
           });
           return;
         }
@@ -409,7 +454,8 @@ const MemberLoginModal = ({
       }
       const resolvedExec = await resolveExecutiveFromFirebaseClient(
         user.uid,
-        verifiedEmail
+        verifiedEmail,
+        user.displayName
       );
       if (resolvedExec && (resolvedExec.level === "super_admin" || resolvedExec.role === "Super Admin") && onAdminLoginSuccess) {
         setStoredExecutiveToken(`firebase-session:${user.uid}`);
@@ -419,7 +465,7 @@ const MemberLoginModal = ({
       await logOutFirebase().catch(() => {
       });
       setErrorMsg(
-        "Access Denied: Google authentication is restricted exclusively to the AMMON Super Admin account."
+        `Access Denied: Google authentication is restricted exclusively to the AMMON Super Admin account (${SUPER_ADMIN_GOOGLE_EMAIL}).`
       );
     } catch (err) {
       const code = err && typeof err === "object" && "code" in err ? String(err.code) : "";
@@ -635,7 +681,7 @@ const MemberLoginModal = ({
     required
     value={resetEmail}
     onChange={(e) => setResetEmail(e.target.value)}
-    placeholder="e.g. millionairefidelis@gmail.com or superadmin@ammon.ng"
+    placeholder="e.g. operator@ammon.com.ng or executive email"
     className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5E7EB] focus:outline-hidden focus:border-[#176B37] font-mono text-xs"
   />
                     </div>
@@ -965,7 +1011,7 @@ const MemberLoginModal = ({
 
                   <div className="p-3 bg-gray-50 rounded-xl border border-[#E5E7EB] text-[11px] text-gray-600 flex items-center gap-2">
                     <Lock className="w-4 h-4 text-[#176B37] shrink-0" />
-                    <span>Google SSO is locked exclusively to the Super Admin account. Other executives &amp; operators sign in with email/badge and password.</span>
+                    <span>Google authentication is enabled exclusively for the Super Admin account ({SUPER_ADMIN_GOOGLE_EMAIL}). All other executives &amp; operators sign in with email/badge and password.</span>
                   </div>
                 </>}
             </div>}

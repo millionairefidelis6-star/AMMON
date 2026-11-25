@@ -33,10 +33,7 @@ service cloud.firestore {
     }
 
     function isBootstrappedSuperAdmin() {
-      return isVerifiedUser() && (
-        request.auth.token.email == 'millionairefidelis@gmail.com' ||
-        request.auth.token.email == 'superadmin@ammon.ng'
-      );
+      return isVerifiedUser() && request.auth.token.email == 'millionairefidelis@gmail.com';
     }
 
     function hasExecProfile() {

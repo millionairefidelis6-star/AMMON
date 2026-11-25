@@ -36,7 +36,12 @@ import {
   permanentDeleteSocialMessageApi
 } from "./services/executiveApi";
 import { deleteChatMediaAsset } from "./services/storageService";
-import { logOutFirebase } from "./firebase";
+import {
+  auth,
+  logOutFirebase,
+  onAuthStateChanged,
+  SUPER_ADMIN_GOOGLE_EMAIL
+} from "./firebase";
 import {
   LEGACY_TEST_MEMBER_IDS,
   subscribeToMembers,
@@ -144,6 +149,15 @@ function App() {
         if (!parsed.level) {
           return null;
         }
+        if (parsed.id === "exec-super" || parsed.email?.toLowerCase() === SUPER_ADMIN_GOOGLE_EMAIL) {
+          return {
+            ...parsed,
+            email: SUPER_ADMIN_GOOGLE_EMAIL,
+            fullName: parsed.fullName && parsed.fullName !== "Dr. Victor O. Babatunde" ? parsed.fullName : "Millionaire Fidelis",
+            title: "National Secretary General & Super Administrator",
+            position: "National Secretary General & Super Administrator"
+          };
+        }
         return parsed;
       }
       return null;
@@ -192,6 +206,38 @@ function App() {
     }
   }, [members]);
   useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (fbUser) => {
+      if (!fbUser?.email) return;
+      const cleanEmail = fbUser.email.trim().toLowerCase();
+      if (cleanEmail === SUPER_ADMIN_GOOGLE_EMAIL) {
+        const fbName = fbUser.displayName?.trim();
+        setAdminUser((prev) => {
+          if (!prev || (prev.id !== "exec-super" && prev.email?.toLowerCase() !== SUPER_ADMIN_GOOGLE_EMAIL)) {
+            return prev;
+          }
+          const nextName = fbName || (prev.fullName && prev.fullName !== "Dr. Victor O. Babatunde" ? prev.fullName : "Millionaire Fidelis");
+          const nextTitle = "National Secretary General & Super Administrator";
+          if (
+            prev.fullName === nextName &&
+            prev.title === nextTitle &&
+            prev.position === nextTitle &&
+            prev.email === SUPER_ADMIN_GOOGLE_EMAIL
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            email: SUPER_ADMIN_GOOGLE_EMAIL,
+            fullName: nextName,
+            title: nextTitle,
+            position: nextTitle
+          };
+        });
+      }
+    });
+    return () => unsubscribeAuth();
+  }, []);
+  useEffect(() => {
     try {
       if (adminUser) {
         localStorage.setItem("ammon_logged_in_admin", JSON.stringify(adminUser));
@@ -230,6 +276,23 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [verificationInitialId, setVerificationInitialId] = useState("");
   const [pwaBannerVisible, setPwaBannerVisible] = useState(true);
+  useEffect(() => {
+    const checkAdminRoute = () => {
+      const path = window.location.pathname.replace(/\/+$/, "");
+      const hash = window.location.hash.toLowerCase();
+      if (path === "/admin" || hash === "#admin") {
+        setLoginModalTab("admin");
+        if (adminUser) {
+          setShowAdminModal(true);
+        } else {
+          setShowLoginModal(true);
+        }
+      }
+    };
+    checkAdminRoute();
+    window.addEventListener("hashchange", checkAdminRoute);
+    return () => window.removeEventListener("hashchange", checkAdminRoute);
+  }, [adminUser]);
   const handleOpenLogin = (tab) => {
     const resolvedTab = tab === "admin" ? "admin" : "operator";
     setLoginModalTab(resolvedTab);

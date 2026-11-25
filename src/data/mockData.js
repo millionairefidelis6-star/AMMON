@@ -238,10 +238,10 @@ const ADMIN_USERS = INITIAL_EXECUTIVE_ACCOUNTS.map((exec) => ({
 const TEST_ADMIN_CREDENTIALS = [
   {
     role: "Super Admin",
-    name: "Dr. Victor O. Babatunde",
-    email: "superadmin@ammon.ng",
+    name: "Millionaire Fidelis",
+    email: "millionairefidelis@gmail.com",
     password: "admin2025",
-    badge: "National Super Admin",
+    badge: "National Secretary General & Super Administrator",
     description: "Full administrative access, operator approvals, security logs & treasury audit"
   },
   {

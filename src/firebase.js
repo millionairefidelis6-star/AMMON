@@ -111,9 +111,9 @@ async function logOutFirebase() {
 async function sendPasswordReset(email) {
   await sendPasswordResetEmail(auth, email);
 }
+const SUPER_ADMIN_GOOGLE_EMAIL = "millionairefidelis@gmail.com";
 const BOOTSTRAPPED_SUPER_ADMIN_EMAILS = [
-  "millionairefidelis@gmail.com",
-  "superadmin@ammon.ng"
+  SUPER_ADMIN_GOOGLE_EMAIL
 ];
 async function signInWithFirebasePassword(email, password) {
   const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
@@ -122,13 +122,16 @@ async function signInWithFirebasePassword(email, password) {
 }
 async function signInSuperAdminWithGoogle() {
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account" });
+  provider.setCustomParameters({
+    prompt: "select_account",
+    login_hint: SUPER_ADMIN_GOOGLE_EMAIL
+  });
   const cred = await signInWithPopup(auth, provider);
   const email = (cred.user.email || "").trim().toLowerCase();
-  if (!BOOTSTRAPPED_SUPER_ADMIN_EMAILS.includes(email)) {
+  if (email !== SUPER_ADMIN_GOOGLE_EMAIL || cred.user.emailVerified !== true) {
     await signOut(auth);
     throw new Error(
-      `Access Denied: Google authentication is restricted exclusively to the Super Admin account. "${cred.user.email || "Selected Google account"}" is not authorized.`
+      `Access Denied: Google authentication is restricted exclusively to the Super Admin account (${SUPER_ADMIN_GOOGLE_EMAIL}). "${cred.user.email || "Selected Google account"}" is not authorized.`
     );
   }
   const idToken = await cred.user.getIdToken(true);
@@ -138,6 +141,7 @@ export {
   BOOTSTRAPPED_SUPER_ADMIN_EMAILS,
   OperationType,
   STORAGE_BUCKET,
+  SUPER_ADMIN_GOOGLE_EMAIL,
   auth,
   db,
   deleteObject,

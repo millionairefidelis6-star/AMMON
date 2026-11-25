@@ -868,7 +868,7 @@ const MemberPortalModal = ({
                             </div>
                             <div className="p-1 bg-white rounded border border-[#176B37]/20 shadow-2xs">
                               <QRCodeSvg
-      value={`https://ammon.ng/verify?id=${member.membershipId}`}
+      value={`https://www.ammon.com.ng/verify?id=${member.membershipId}`}
       size={40}
       fgColor="#176B37"
     />

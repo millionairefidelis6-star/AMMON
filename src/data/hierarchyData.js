@@ -275,12 +275,12 @@ function formatJurisdictionLabel(exec) {
 const INITIAL_EXECUTIVE_ACCOUNTS = [
   {
     id: "exec-super",
-    fullName: "Dr. Victor O. Babatunde",
+    fullName: "Millionaire Fidelis",
     role: "Super Admin",
     level: "super_admin",
-    title: "National President & Registrar-General",
-    position: "National President & Super Administrator",
-    email: "superadmin@ammon.ng",
+    title: "National Secretary General & Super Administrator",
+    position: "National Secretary General & Super Administrator",
+    email: "millionairefidelis@gmail.com",
     phone: "+234 800 266 6661",
     defaultPassword: "admin2025",
     jurisdiction: "National Headquarters (36 States + FCT)",

@@ -30,7 +30,7 @@ const Footer = ({
             </p>
 
             <div className="pt-2 text-[11px] text-gray-500 space-y-1">
-              <p>CAC Registration: <strong className="font-mono text-gray-700">CAC/IT/NO/129481</strong></p>
+              <p>CAC Registration: <strong className="font-mono text-gray-700">RC 80540</strong></p>
               <p>Recognised by: <strong className="text-[#176B37]">Central Bank of Nigeria (CBN)</strong></p>
             </div>
           </div>
@@ -138,7 +138,9 @@ const Footer = ({
               </div>
               <div className="flex items-center gap-2 text-gray-700">
                 <Globe className="w-4 h-4 text-[#176B37] shrink-0" />
-                <span>www.ammon.ng</span>
+                <a href="https://www.ammon.com.ng" target="_blank" rel="noopener noreferrer" className="hover:text-[#176B37] hover:underline">
+                  www.ammon.com.ng
+                </a>
               </div>
             </div>
 

@@ -285,9 +285,9 @@ const Header = ({
             </div>
 
             {
-    /* 3. Authenticated Executive Menu / Executive Sign-In Trigger */
+    /* 3. Authenticated Executive Menu (shown only after executive/super-admin sign-in) */
   }
-            {adminUser ? <div className="relative shrink-0">
+            {adminUser && <div className="relative shrink-0">
                 <button
     onClick={(e) => {
       e.stopPropagation();
@@ -349,14 +349,7 @@ const Header = ({
                       </button>
                     </div>
                   </div>}
-              </div> : <button
-    onClick={onOpenAdmin}
-    className="flex items-center gap-1 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer shrink-0 shadow-2xs"
-    title="Executive & Directorate Login"
-  >
-                <Crown className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-600 shrink-0" />
-                <span>Admin</span>
-              </button>}
+              </div>}
 
             {
     /* Authenticated Member Pill (if logged in) */
@@ -424,14 +417,12 @@ const Header = ({
     onClick={() => {
       if (adminUser) {
         onOpenAdmin();
-      } else if (loggedInMember) {
-        onOpenPortal();
       } else {
-        onOpenAdmin();
+        onOpenPortal();
       }
     }}
     className="w-7 h-7 sm:w-auto sm:px-3 sm:py-1.5 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold bg-[#176B37] text-white hover:bg-[#14532D] shadow-2xs transition-colors cursor-pointer shrink-0"
-    title="Open AMMON Directorate & Member Dashboard"
+    title="Open Member Portal Dashboard"
     aria-label="Dashboard"
   >
               <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 text-white" />
@@ -579,7 +570,7 @@ const Header = ({
   >
                   Member Portal Login
                 </button>}
-              {adminUser ? <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 space-y-2">
+              {adminUser && <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200 space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-bold text-xs text-gray-900">{adminUser.fullName}</p>
@@ -607,15 +598,7 @@ const Header = ({
                       Exit Admin
                     </button>
                   </div>
-                </div> : <button
-    onClick={() => {
-      setMobileMenuOpen(false);
-      onOpenAdmin();
-    }}
-    className="w-full py-2.5 bg-gray-100 text-[#252525] rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors cursor-pointer"
-  >
-                  Directorate & Admin Dashboard
-                </button>}
+                </div>}
               <button
     onClick={() => {
       setMobileMenuOpen(false);

@@ -21,7 +21,7 @@ import {
   sanitizeExecutive,
   verifyPassword
 } from "./server/store.js";
-const PORT = Number(process.env.PORT || 3e3);
+const PORT = Number(process.env.PORT) || 3000;
 const TOKEN_SECRET = process.env.AMMON_JWT_SECRET || crypto.createHash("sha256").update(`${firebaseConfig.projectId}:${firebaseConfig.appId}:ammon-exec-auth`).digest("hex");
 function signExecutiveToken(exec) {
   const payload = {
@@ -162,6 +162,7 @@ function denyAndLogJurisdictionViolation(exec, res, targetLabel, details, geo) {
 }
 async function createAppServer() {
   const app = express();
+  app.set("trust proxy", 1);
   app.use(express.json({ limit: "10mb" }));
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, service: "AMMON Hierarchical Governance API", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
@@ -1755,23 +1756,64 @@ async function createAppServer() {
     res.status(404).json({ error: "API route not found." });
   });
 
-  const isProd = process.env.NODE_ENV === "production";
+  const isExplicitDev = process.env.NODE_ENV === "development" || process.env.npm_lifecycle_event === "dev";
   const distDir = path.resolve(__dirname, "dist");
-  if (!isProd) {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa"
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static("dist"));
-    app.use(express.static(distDir));
+  const distIndexPath = path.join(distDir, "index.html");
+  const rootIndexPath = path.resolve(__dirname, "index.html");
+  const publicDir = path.resolve(__dirname, "public");
+  const hasDistBuild = fs.existsSync(distIndexPath);
+
+  if (isExplicitDev && process.env.NODE_ENV !== "production" || !hasDistBuild && process.env.NODE_ENV !== "production") {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        root: __dirname,
+        server: {
+          middlewareMode: true,
+          hmr: isExplicitDev ? void 0 : false
+        },
+        appType: "spa"
+      });
+      app.get("/", async (req, res, next) => {
+        try {
+          if (!fs.existsSync(rootIndexPath)) {
+            res.status(404).send("index.html not found.");
+            return;
+          }
+          const rawHtml = fs.readFileSync(rootIndexPath, "utf8");
+          const html = await vite.transformIndexHtml(req.originalUrl, rawHtml);
+          res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(html);
+        } catch (err) {
+          vite.ssrFixStacktrace(err);
+          next(err);
+        }
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr) {
+      console.warn("Vite middleware unavailable, falling back to static dist serving:", viteErr?.message || viteErr);
+    }
+  }
+
+  if (!isExplicitDev || process.env.NODE_ENV === "production") {
+    if (fs.existsSync(distDir)) {
+      app.use(express.static(distDir, { index: "index.html" }));
+    }
+    if (fs.existsSync(publicDir)) {
+      app.use(express.static(publicDir));
+    }
+    const serveSpaEntry = (_req, res) => {
+      if (fs.existsSync(distIndexPath)) {
+        res.sendFile(distIndexPath);
+        return;
+      }
+      res.status(503).send("Application build not found (dist/index.html). Please run npm run build.");
+    };
+    app.get("/", serveSpaEntry);
     app.get("*", (req, res, next) => {
       if (req.path.startsWith("/api/") || req.path === "/api" || req.path.startsWith("/ws/")) {
         return next();
       }
-      res.sendFile(path.join(distDir, "index.html"));
+      serveSpaEntry(req, res);
     });
   }
   const meetingRooms = /* @__PURE__ */ new Map();
